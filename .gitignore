@@ -1,0 +1,42 @@
+# Node/Electron/Vite/TypeScript
+node_modules/
+dist/
+electron-dist/
+testdata/
+release/
+.electron-user-data/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*.local
+
+# Build artifacts
+*.tsbuildinfo
+*.map
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test/coverage
+coverage/
+*.lcov
+
+# Misc
+*.cache
+
+# Sensitive local wallet/script outputs
+tron_addresses.txt
+tron_addresses.csv
+tron_addresses_with_private_keys.csv
+scripts/*.verify.json

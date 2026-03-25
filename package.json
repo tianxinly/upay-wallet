@@ -1,0 +1,65 @@
+{
+  "name": "tron-wallet-suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise TRON desktop app: offline signing + broadcast (TRC20 USDT)",
+  "author": "Your Company",
+  "main": "electron-dist/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "npm run build && electron .",
+    "dev:hot": "cmd /c \"start \"\" tsup --watch && start \"\" vite && wait-on electron-dist/main.js http://localhost:5173 && electron .\"",
+    "build:renderer": "vite build",
+    "build:main": "tsup",
+    "build": "npm run build:main && npm run build:renderer",
+    "dist:win": "npm run build && electron-builder -w",
+    "dist:mac": "npm run build && electron-builder -m",
+    "dist": "npm run build && electron-builder",
+    "verify:collectsign": "node scripts/verify-collect-sign.cjs",
+    "verify:broadcast": "node scripts/verify-broadcast.cjs",
+    "verify:scan": "node scripts/verify-scan.cjs",
+    "lint": "echo \"(optional) add lint script\""
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tronweb": "^6.0.0",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^40.0.0",
+    "electron-builder": "^25.0.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.company.tronwalletsuite",
+    "productName": "Tron Wallet Suite",
+    "files": ["electron-dist/**", "dist/**", "package.json"],
+    "extraResources": [
+      "collect-sign.sample.json",
+      "broadcast.sample.json"
+    ],
+    "asar": true,
+    "directories": {
+      "buildResources": "resources",
+      "output": "release"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    }
+  }
+}
