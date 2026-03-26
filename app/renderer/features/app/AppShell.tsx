@@ -1608,7 +1608,7 @@ export default function App() {
         <div className="brand">
           <div className="brand-title">
             <span className="brand-kicker">TRON</span>
-            <h1>Tron Wallet Suite</h1>
+            <h1>upay-wallet</h1>
           </div>
           <p>企业级离线签名与广播工具（TRC20 USDT）</p>
         </div>

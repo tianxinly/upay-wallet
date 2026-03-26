@@ -1,4 +1,4 @@
-# Tron Wallet Suite（桌面端）
+# upay-wallet（桌面端）
 
 企业级 TRC20 USDT 离线签名与广播工具，面向 Windows 与 macOS。
 

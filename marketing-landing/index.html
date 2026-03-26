@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>upay-wallet | 企业级资金归集引擎</title>
+    <meta
+      name="description"
+      content="upay-wallet：离线签名、在线广播、批量扫描的一体化企业钱包工作台。面向交易所、托管服务、资产团队。"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-noise" aria-hidden="true"></div>
+
+    <header class="site-header container">
+      <a href="#" class="brand">
+        <span class="brand-mark">TWS</span>
+        <span class="brand-text">upay-wallet</span>
+      </a>
+      <nav class="top-nav">
+        <a href="#value">产品价值</a>
+        <a href="#scenarios">应用场景</a>
+        <a href="#security">安全架构</a>
+      </nav>
+      <a href="#cta" class="btn btn-ghost">预约演示</a>
+    </header>
+
+    <main>
+      <section class="hero container reveal">
+        <div class="hero-content">
+          <p class="kicker">Enterprise Wallet Operations</p>
+          <h1>把 TRON 钱包管理，从手工流程升级为机构级资产流水线</h1>
+          <p class="hero-desc">
+            面向交易平台、托管服务、资金团队打造的桌面化解决方案。核心思路是
+            <strong>离线签名 + 在线广播 + 全流程可审计</strong>，让效率和安全同时成立。
+          </p>
+          <div class="hero-actions">
+            <a href="#cta" class="btn btn-primary">获取商业方案</a>
+            <a href="#security" class="btn btn-secondary">查看安全细节</a>
+          </div>
+          <div class="hero-stats">
+            <article>
+              <strong>10,000+</strong>
+              <span>单次可处理地址规模</span>
+            </article>
+            <article>
+              <strong>3-Stage</strong>
+              <span>扫描、签名、广播标准闭环</span>
+            </article>
+            <article>
+              <strong>0 Key Online</strong>
+              <span>核心私钥在线暴露面</span>
+            </article>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <img src="./assets/scene-exchange.svg" alt="产品主视觉：钱包运营控制台" />
+          <div class="floating-card">
+            <span>MAINNET READY</span>
+            <p>面向企业生产环境的资产归集执行面板</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="value" class="value container reveal">
+        <div class="section-head">
+          <p class="kicker">Value Proposition</p>
+          <h2>三大能力，解决资金归集最贵的三种成本</h2>
+        </div>
+        <div class="value-grid">
+          <article class="value-card">
+            <h3>安全成本</h3>
+            <p>私钥永不触网，签名广播职责分离，显著降低热端泄露风险与内控压力。</p>
+          </article>
+          <article class="value-card">
+            <h3>人力成本</h3>
+            <p>批量处理地址与交易，一次任务可覆盖海量钱包，减少重复人工操作。</p>
+          </article>
+          <article class="value-card">
+            <h3>合规成本</h3>
+            <p>关键节点可追溯，支持审计留痕与流程复盘，便于满足机构风控规范。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="workflow container reveal">
+        <div class="section-head">
+          <p class="kicker">Workflow</p>
+          <h2>可复制的标准作业流，而不是依赖“熟练工”</h2>
+        </div>
+        <img src="./assets/scene-workflow.svg" alt="扫描、离线签名、在线广播三步流程图" />
+      </section>
+
+      <section id="scenarios" class="scenarios container reveal">
+        <div class="section-head">
+          <p class="kicker">Scenarios</p>
+          <h2>适配交易所、托管、机构资产团队三类高频场景</h2>
+        </div>
+        <div class="scenario-grid">
+          <article class="scenario-card">
+            <img src="./assets/scene-exchange.svg" alt="交易所热钱包运营场景" />
+            <div>
+              <h3>交易所热钱包运维</h3>
+              <p>日常高频归集任务标准化执行，降低运维波动和人为错误。</p>
+            </div>
+          </article>
+          <article class="scenario-card">
+            <img src="./assets/scene-custody.svg" alt="托管服务商清分与归集场景" />
+            <div>
+              <h3>托管服务商清分</h3>
+              <p>多租户地址池集中管控，按策略自动批量推进归集流程。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="security" class="security container reveal">
+        <div class="section-head">
+          <p class="kicker">Security Architecture</p>
+          <h2>从架构层做减法，让风险边界可解释、可验证</h2>
+        </div>
+        <div class="security-grid">
+          <img src="./assets/hero-dashboard.svg" alt="企业级安全架构与控制台示意" />
+          <ul>
+            <li><strong>离线域：</strong>助记词与签名逻辑驻留冷环境，隔离网络攻击面。</li>
+            <li><strong>在线域：</strong>仅负责广播与查询，不保存可直接盗取资产的私钥。</li>
+            <li><strong>审计域：</strong>交易输入、输出、回执统一归档，支持追踪与复核。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="cta" class="cta container reveal">
+        <div>
+          <p class="kicker">Next Action</p>
+          <h2>把你的钱包作业流升级成可规模化的企业级能力</h2>
+          <p>可以从单业务线试点开始，逐步扩展到全量地址池和团队协作流程。</p>
+        </div>
+        <a href="mailto:bd@example.com" class="btn btn-primary">预约 1v1 演示</a>
+      </section>
+    </main>
+
+    <footer class="site-footer container">
+      <p>© 2026 upay-wallet. Enterprise-grade wallet operations platform.</p>
+    </footer>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

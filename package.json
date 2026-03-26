@@ -1,5 +1,5 @@
 {
-  "name": "tron-wallet-suite",
+  "name": "upay-wallet",
   "version": "1.0.0",
   "private": true,
   "description": "Enterprise TRON desktop app: offline signing + broadcast (TRC20 USDT)",
@@ -37,8 +37,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.company.tronwalletsuite",
-    "productName": "Tron Wallet Suite",
+    "appId": "com.company.upaywallet",
+    "productName": "upay-wallet",
     "files": ["electron-dist/**", "dist/**", "package.json"],
     "extraResources": [
       "collect-sign.sample.json",
