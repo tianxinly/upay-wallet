@@ -235,6 +235,34 @@ function resolveWriteFileByToken(token: string) {
   return filePath;
 }
 
+function validateQuickCollectParams(params: any) {
+  const items = Array.isArray(params?.items) ? params.items : [];
+  if (!params?.fullHost) throw new Error("full_host 不能为空");
+  if (!params?.usdt_contract) throw new Error("usdt_contract 不能为空");
+  if (!params?.to) throw new Error("归集目标地址不能为空");
+  if (!Number.isInteger(params?.decimals) || params.decimals < 0) {
+    throw new Error("decimals 必须为非负整数");
+  }
+  if (!Number.isInteger(params?.fee_limit) || params.fee_limit <= 0) {
+    throw new Error("fee_limit 必须为正整数（SUN）");
+  }
+  if (!params?.enc_mnemonic || !params?.password) {
+    throw new Error("HD 钱包解密参数缺失");
+  }
+  if (!Array.isArray(params?.indices) || params.indices.length === 0) {
+    throw new Error("indices 不能为空");
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error("items 不能为空");
+  }
+  if (items.some((row: any) => !row?.from || !row?.amount)) {
+    throw new Error("items 中存在地址或金额为空的数据");
+  }
+  if (params.indices.some((i: any) => !Number.isInteger(i) || i < 0)) {
+    throw new Error("indices 必须为非负整数数组");
+  }
+}
+
 app.whenReady().then(() => {
   const win = createWindow();
 
@@ -335,6 +363,80 @@ app.whenReady().then(() => {
     );
     sendLog(event, `离线签名完成(HD): ${res.count}`);
     return res;
+  });
+
+  ipcMain.handle("quick:collect", async (event, params) => {
+    validateQuickCollectParams(params);
+    const {
+      fullHost,
+      tron_api_key,
+      usdt_contract,
+      decimals,
+      fee_limit,
+      to,
+      items,
+      taskId,
+      enc_mnemonic,
+      password,
+      indices
+    } = params;
+
+    const ref = await fetchRefBlock(fullHost, tron_api_key);
+    const mnemonic = await decryptMnemonic(enc_mnemonic, password);
+    const derived = deriveHdWalletByIndices(mnemonic, indices);
+    if (derived.items.length !== items.length) {
+      throw new Error("派生数量与签名条数不一致");
+    }
+    const signItems = items.map((row: any, idx: number) => {
+      const d = derived.items[idx];
+      if (!d || d.address !== row.from) {
+        throw new Error(`第 ${idx + 1} 行地址不匹配`);
+      }
+      return {
+        ...row,
+        private_key: d.privateKey
+      };
+    });
+    const signInput = {
+      contract_address: usdt_contract,
+      to,
+      decimals,
+      fee_limit,
+      timestamp: Number(ref.timestamp || 0),
+      expiration: Number(ref.expiration || 0),
+      ref_block_bytes: String(ref.ref_block_bytes || ""),
+      ref_block_hash: String(ref.ref_block_hash || ""),
+      items: signItems
+    };
+
+    const tempOutput = path.join(app.getPath("temp"), `quick-collect-${webcrypto.randomUUID()}.json`);
+    sendLog(event, `快捷归集开始: items=${signItems.length}, host=${fullHost}`);
+    try {
+      await collectSign(signInput as any, tempOutput, (p) => sendProgress(event, taskId, { stage: "sign", ...p }));
+      const signedText = fs.readFileSync(tempOutput, "utf8");
+      const parsed = JSON.parse(signedText);
+      const signedTxs = Array.isArray(parsed?.signed_txs) ? parsed.signed_txs : [];
+      const broadcastRes = await broadcast(
+        fullHost,
+        signedTxs,
+        tron_api_key,
+        usdt_contract,
+        (p) => sendProgress(event, taskId, { stage: "broadcast", ...p })
+      );
+      sendLog(event, `快捷归集完成: success=${broadcastRes.success}, fail=${broadcastRes.fail}`);
+      return {
+        signed: signedTxs.length,
+        success: broadcastRes.success,
+        fail: broadcastRes.fail,
+        results: broadcastRes.results
+      };
+    } finally {
+      try {
+        if (fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   });
 
   ipcMain.handle("broadcast:send", async (event, params) => {

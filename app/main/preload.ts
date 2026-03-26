@@ -27,6 +27,19 @@ contextBridge.exposeInMainWorld("api", {
     password: string;
     indices: number[];
   }) => ipcRenderer.invoke("collect:signHd", params),
+  quickCollect: (params: {
+    fullHost: string;
+    tron_api_key?: string;
+    usdt_contract: string;
+    decimals: number;
+    fee_limit: number;
+    to: string;
+    items: Array<{ from: string; amount: string }>;
+    taskId: string;
+    enc_mnemonic: string;
+    password: string;
+    indices: number[];
+  }) => ipcRenderer.invoke("quick:collect", params),
   broadcast: (params: {
     fullHost: string;
     tron_api_key?: string;

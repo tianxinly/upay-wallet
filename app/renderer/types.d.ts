@@ -31,6 +31,24 @@ declare global {
         password: string;
         indices: number[];
       }) => Promise<any>;
+      quickCollect: (params: {
+        fullHost: string;
+        tron_api_key?: string;
+        usdt_contract: string;
+        decimals: number;
+        fee_limit: number;
+        to: string;
+        items: Array<{ from: string; amount: string }>;
+        taskId: string;
+        enc_mnemonic: string;
+        password: string;
+        indices: number[];
+      }) => Promise<{
+        signed: number;
+        success: number;
+        fail: number;
+        results: any[];
+      }>;
       broadcast: (params: {
         fullHost: string;
         tron_api_key?: string;

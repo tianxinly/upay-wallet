@@ -106,7 +106,7 @@ function loadFeeInitMap(): Record<string, boolean> {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<
-    "overview" | "sign" | "refblock" | "broadcast" | "scan" | "wallet" | "fee"
+    "overview" | "sign" | "quick" | "refblock" | "broadcast" | "scan" | "wallet" | "fee"
   >("overview");
   const [appInfo, setAppInfo] = useState<{ version: string; platform: string; userDataPath: string } | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -140,6 +140,10 @@ export default function App() {
   const [signResult, setSignResult] = useState<string>("");
   const [signJsonPreview, setSignJsonPreview] = useState("{}");
   const [signLoading, setSignLoading] = useState(false);
+  const [quickAddressAmountCsv, setQuickAddressAmountCsv] = useState("index,address,amount\n");
+  const [quickPassword, setQuickPassword] = useState("");
+  const [quickResult, setQuickResult] = useState("");
+  const [quickLoading, setQuickLoading] = useState(false);
 
   // 广播
   const [signedJsonText, setSignedJsonText] = useState("{\"signed_txs\":[]}");
@@ -315,7 +319,13 @@ export default function App() {
 
   useEffect(() => {
     // 实时预览 JSON，便于导出与校验
-    const addressAmount = parseAddressAmountCsv(addressAmountCsv);
+    let addressAmount: Array<{ address: string; amount: string }> = [];
+    try {
+      addressAmount = parseAddressAmountCsv(addressAmountCsv);
+    } catch {
+      // 预览阶段忽略 CSV 解析异常，提交时再给出明确错误
+      addressAmount = [];
+    }
     const items = addressAmount.map((row) => ({
       from: row.address,
       amount: row.amount
@@ -1026,6 +1036,132 @@ export default function App() {
     }
   }
 
+  async function handleQuickCollect() {
+    if (quickLoading) return;
+    setQuickLoading(true);
+    setQuickResult("");
+    setErrorMessage("");
+    if (!toAddress) {
+      const msg = "请先在设置中添加归集地址并选择目标地址";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    if (!selectedWallet) {
+      const msg = "请先在钱包管理中创建并选择 HD 钱包";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    if (!quickPassword.trim()) {
+      const msg = "请填写 HD 钱包解密密码";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    if (!config.full_host) {
+      const msg = "full_host 未设置，请在设置中填写";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    if (!config.usdt_contract || config.usdt_contract === "REPLACE_WITH_USDT_CONTRACT") {
+      const msg = "USDT 合约地址未设置，请在设置中填写";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+
+    let addressAmount: Array<{ index?: number; address: string; amount: string }> = [];
+    try {
+      addressAmount = parseAddressAmountCsv(quickAddressAmountCsv);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    if (addressAmount.length === 0) {
+      const msg = "地址 + 金额 CSV 为空或格式不正确";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+
+    const invalidRow = addressAmount.findIndex((row: any) => !row.address || !row.amount);
+    if (invalidRow >= 0) {
+      const msg = `第 ${invalidRow + 1} 行地址或金额为空`;
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+
+    const hasIndex = addressAmount.some((row: any) => Number.isInteger(row.index));
+    if (!hasIndex) {
+      const msg = "CSV 必须包含 index 列，用于非连续地址派生";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+
+    let indices: number[] = [];
+    try {
+      indices = addressAmount.map((row: any, idx: number) => {
+        const index = Number(row.index);
+        if (!Number.isInteger(index) || index < 0) {
+          throw new Error(`第 ${idx + 1} 行 index 无效`);
+        }
+        return index;
+      });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+
+    const taskId = randomId();
+    try {
+      const res = await window.api.quickCollect({
+        fullHost: config.full_host,
+        tron_api_key: config.tron_api_key,
+        usdt_contract: config.usdt_contract,
+        decimals: config.decimals,
+        fee_limit: config.fee_limit,
+        to: toAddress,
+        items: addressAmount.map((row: any) => ({
+          from: row.address,
+          amount: row.amount
+        })),
+        taskId,
+        enc_mnemonic: selectedWallet.enc_mnemonic,
+        password: quickPassword.trim(),
+        indices
+      });
+      const summary = `快捷归集完成: 签名=${res.signed}, 成功=${res.success}, 失败=${res.fail}`;
+      const errorDetails = res.fail > 0 ? formatBroadcastErrors(res.results) : "";
+      const combined = errorDetails ? `${summary}\n\n失败详情:\n${errorDetails}` : summary;
+      setQuickResult(combined);
+      if (errorDetails) reportError(errorDetails);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setQuickResult(msg);
+      reportError(msg);
+    } finally {
+      setQuickLoading(false);
+    }
+  }
+
   async function handleFetchRefBlock() {
     if (refblockLoading) return;
     setRefblockLoading(true);
@@ -1541,6 +1677,9 @@ export default function App() {
         </div>
         <div className="tabs-group">
           <span className="tabs-label online">联网</span>
+          <button className={activeTab === "quick" ? "active online" : "online"} onClick={() => setActiveTab("quick")}>
+            快捷归集
+          </button>
           <button className={activeTab === "refblock" ? "active online" : "online"} onClick={() => setActiveTab("refblock")}>
             区块引用
           </button>
@@ -1721,6 +1860,104 @@ export default function App() {
               {signLoading ? "签名中..." : "离线签名"}
             </button>
             {signResult && <pre className="result">{signResult}</pre>}
+          </section>
+        )}
+
+        {activeTab === "quick" && (
+          <section className="panel">
+            <h2>快捷归集（自动取区块引用并广播）</h2>
+            <div className="hint">
+              输入 `index,address,amount` CSV，选择 HD 钱包与归集地址后，一键完成签名与广播。
+            </div>
+            <div className="row space" style={{ marginBottom: 8 }}>
+              <h3>初始化输入</h3>
+              <button
+                onClick={() => {
+                  setQuickAddressAmountCsv("index,address,amount\n");
+                  setQuickPassword("");
+                  setQuickResult("");
+                }}
+              >
+                重置本页输入
+              </button>
+            </div>
+            <div className="grid">
+              <label>
+                归集目标地址
+                {config.collection_addresses.length === 0 ? (
+                  <div className="empty-inline">
+                    <span>未配置归集地址</span>
+                    <button onClick={openCollectionSettings}>去设置</button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="select-row">
+                      <select
+                        value={selectedCollectionId}
+                        onChange={(e) => setSelectedCollectionId(e.target.value)}
+                      >
+                        {config.collection_addresses.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} · {shortAddress(item.address)}
+                          </option>
+                        ))}
+                      </select>
+                      <button onClick={openCollectionSettings}>管理</button>
+                    </div>
+                    <div className="hint">地址：{toAddress}</div>
+                  </>
+                )}
+              </label>
+              <label>
+                选择 HD 钱包
+                {config.hd_wallets.length === 0 ? (
+                  <div className="empty-inline">
+                    <span>未创建 HD 钱包</span>
+                    <button onClick={() => setActiveTab("wallet")}>去钱包管理</button>
+                  </div>
+                ) : (
+                  <div className="select-row">
+                    <select value={selectedWalletId} onChange={(e) => setSelectedWalletId(e.target.value)}>
+                      {config.hd_wallets.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} · {shortXpub(item.xpub)}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={() => setActiveTab("wallet")}>管理</button>
+                  </div>
+                )}
+              </label>
+            </div>
+            <div className="grid">
+              <label>
+                HD 钱包解密密码
+                <input
+                  type="password"
+                  value={quickPassword}
+                  onChange={(e) => setQuickPassword(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="row space">
+              <h3>地址 + 金额 CSV</h3>
+              <button onClick={async () => {
+                const file = await window.api.selectOpenFile({ filters: [{ name: "CSV", extensions: ["csv"] }] });
+                if (!file) return;
+                const text = await window.api.readTextFile(file.token);
+                setQuickAddressAmountCsv(text);
+              }}>导入 CSV</button>
+            </div>
+            <textarea
+              value={quickAddressAmountCsv}
+              onChange={(e) => setQuickAddressAmountCsv(e.target.value)}
+              rows={10}
+            />
+            <div className="hint">CSV 列为: index,address,amount（必须提供 index）</div>
+            <button className="primary" onClick={handleQuickCollect} disabled={quickLoading}>
+              {quickLoading ? "归集中..." : "一键快捷归集"}
+            </button>
+            {quickResult && <pre className="result">{quickResult}</pre>}
           </section>
         )}
 
