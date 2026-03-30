@@ -1,0 +1,38 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="128" y1="64" x2="896" y2="960" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b0f16"/>
+      <stop offset="55%" stop-color="#111826"/>
+      <stop offset="100%" stop-color="#161f2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(320 240) rotate(45) scale(520 520)">
+      <stop offset="0%" stop-color="#2b7fff" stop-opacity="0.35"/>
+      <stop offset="60%" stop-color="#3dd6a7" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="strokeGrad" x1="256" y1="192" x2="832" y2="832" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2b7fff"/>
+      <stop offset="100%" stop-color="#3dd6a7"/>
+    </linearGradient>
+    <linearGradient id="uGrad" x1="512" y1="320" x2="512" y2="784" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#e9f2ff"/>
+      <stop offset="55%" stop-color="#b6f1dc"/>
+      <stop offset="100%" stop-color="#3dd6a7"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="196" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="196" fill="url(#glow)"/>
+
+  <path
+    d="M512 196 L800 360 L800 664 L512 828 L224 664 L224 360 Z"
+    stroke="url(#strokeGrad)" stroke-width="40" stroke-linejoin="round"
+  />
+
+  <path
+    d="M360 332 V620 C360 708 424 772 512 772 C600 772 664 708 664 620 V332"
+    stroke="url(#uGrad)" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"
+  />
+
+  <circle cx="698" cy="360" r="26" fill="#0f1115" stroke="url(#strokeGrad)" stroke-width="16"/>
+</svg>
