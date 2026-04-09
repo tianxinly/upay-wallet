@@ -1678,6 +1678,12 @@ export default function App() {
 
       <nav className="tabs">
         <div className="tabs-group">
+          <span className="tabs-label">首页</span>
+          <button className={activeTab === "overview" ? "active" : ""} onClick={() => setActiveTab("overview")}>
+            运行概览
+          </button>
+        </div>
+        <div className="tabs-group">
           <span className="tabs-label offline">离线</span>
           <button className={activeTab === "sign" ? "active offline" : "offline"} onClick={() => setActiveTab("sign")}>
             离线签名
@@ -1708,45 +1714,124 @@ export default function App() {
 
       <main className="content">
         {activeTab === "overview" && (
-          <section className="panel hero-panel">
+          <section className="panel hero-panel overview-hero">
             <div className="hero-header">
               <div>
-                <h2>运行概览</h2>
-                <p className="muted">默认展示关键流程与安全提醒，操作入口在下方功能区。</p>
+                <h2>运行控制台</h2>
+                <p className="muted">先看状态，再决定下一步操作。常用入口已集中在右侧。</p>
               </div>
-              <div className="hero-tags">
-                <span className={`tag ${currentNetworkKey}`}>当前网络：{networkLabel}</span>
-                <span className="tag">归集地址：{config.collection_addresses.length} 个</span>
+              <div className="hero-actions">
+                <button className="primary-button" onClick={() => setActiveTab("sign")}>
+                  立即离线签名
+                </button>
+                <button className="ghost-button" onClick={() => setActiveTab("refblock")}>
+                  获取区块引用
+                </button>
+                <button className="ghost-button" onClick={() => setActiveTab("broadcast")}>
+                  广播上链
+                </button>
               </div>
             </div>
-            <div className="overview-grid">
-              <div className="overview-card">
-                <h3>离线签名流程</h3>
-                <ol>
-                  <li>准备「index,address,amount」CSV（非连续地址需带 index）。</li>
-                  <li>在钱包管理创建 HD 钱包，离线签名时选择。</li>
-                  <li>选择归集目标地址，粘贴区块引用 JSON。</li>
-                  <li>执行离线签名，得到 signed_txs.json。</li>
-                </ol>
-                <div className="hint">区块引用来自在线节点，离线机仅粘贴。</div>
+            <div className="overview-grid dashboard-grid">
+              <div className="overview-card status-card">
+                <h3>系统状态</h3>
+                <div className="stat-list">
+                  <div className="stat-item">
+                    <span>登录状态</span>
+                    <strong>{loginLocked ? "已锁定" : "已解锁"}</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>当前网络</span>
+                    <strong>{networkLabel}</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>会话时长</span>
+                    <strong>{config.auth_session_minutes || 30} 分钟</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>运行进度</span>
+                    <strong>{progressText || "暂无任务"}</strong>
+                  </div>
+                </div>
               </div>
-              <div className="overview-card">
-                <h3>在线流程</h3>
-                <ol>
-                  <li>区块引用页获取最新 ref_block JSON。</li>
-                  <li>广播页导入 signed_txs.json。</li>
-                  <li>扫描页用于统计与阈值筛选。</li>
-                </ol>
-                <div className="hint">广播会输出结果文件，方便审计。</div>
+              <div className="overview-card status-card">
+                <h3>关键配置</h3>
+                <div className="stat-list">
+                  <div className="stat-item">
+                    <span>归集地址</span>
+                    <strong>{config.collection_addresses.length} 个</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>钱包数量</span>
+                    <strong>{config.hd_wallets.length} 个</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>USDT 合约</span>
+                    <strong>{config.usdt_contract ? "已配置" : "未配置"}</strong>
+                  </div>
+                  <div className="stat-item">
+                    <span>TRON API Key</span>
+                    <strong>{config.tron_api_key ? "已配置" : "未配置"}</strong>
+                  </div>
+                </div>
               </div>
-              <div className="overview-card">
-                <h3>安全提示</h3>
-                <ul>
-                  <li>离线签名不联网，私钥不离开本机。</li>
-                  <li>生产环境建议使用专用离线机。</li>
-                  <li>在线广播请选择可信节点。</li>
+              <div className="overview-card status-card">
+                <h3>最近输出</h3>
+                <ul className="compact-list">
+                  <li>离线签名：{signResult ? `已生成 ${signOutputPath}` : "暂无输出"}</li>
+                  <li>广播上链：{broadcastResult ? `已生成 ${broadcastOutputPath}` : "暂无输出"}</li>
+                  <li>扫描统计：{scanSummary ? "已生成统计" : "暂无输出"}</li>
+                  <li>快捷归集：{quickResult ? "已完成处理" : "暂无输出"}</li>
                 </ul>
-                <div className="hint">日志在右上角可随时查看。</div>
+                <div className="hint">输出文件可用于审计与复核。</div>
+              </div>
+              <div className="overview-card status-card">
+                <h3>风险提示</h3>
+                {errorMessage ? (
+                  <div className="error-banner">{errorMessage}</div>
+                ) : (
+                  <ul className="compact-list">
+                    <li>离线机不联网，私钥不出本机。</li>
+                    <li>在线广播请选择可信节点。</li>
+                    <li>操作前请核验归集目标地址。</li>
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="flow-section">
+              <div className="flow-header">
+                <h3>流程说明</h3>
+                <span className="muted">保留完整流程，方便新成员上手。</span>
+              </div>
+              <div className="overview-grid flow-grid">
+                <div className="overview-card">
+                  <h3>离线签名流程</h3>
+                  <ol>
+                    <li>准备「index,address,amount」CSV（非连续地址需带 index）。</li>
+                    <li>在钱包管理创建 HD 钱包，离线签名时选择。</li>
+                    <li>选择归集目标地址，粘贴区块引用 JSON。</li>
+                    <li>执行离线签名，得到 signed_txs.json。</li>
+                  </ol>
+                  <div className="hint">区块引用来自在线节点，离线机仅粘贴。</div>
+                </div>
+                <div className="overview-card">
+                  <h3>在线流程</h3>
+                  <ol>
+                    <li>区块引用页获取最新 ref_block JSON。</li>
+                    <li>广播页导入 signed_txs.json。</li>
+                    <li>扫描页用于统计与阈值筛选。</li>
+                  </ol>
+                  <div className="hint">广播会输出结果文件，方便审计。</div>
+                </div>
+                <div className="overview-card">
+                  <h3>安全提示</h3>
+                  <ul>
+                    <li>离线签名不联网，私钥不离开本机。</li>
+                    <li>生产环境建议使用专用离线机。</li>
+                    <li>在线广播请选择可信节点。</li>
+                  </ul>
+                  <div className="hint">日志在右上角可随时查看。</div>
+                </div>
               </div>
             </div>
           </section>
