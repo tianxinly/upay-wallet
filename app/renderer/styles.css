@@ -350,6 +350,20 @@ body {
   margin-bottom: 12px;
 }
 
+.transfer-row {
+  display: grid;
+  grid-template-columns: minmax(320px, 2fr) minmax(200px, 1fr) minmax(200px, 1fr);
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 980px) {
+  .transfer-row {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+
 label {
   display: flex;
   flex-direction: column;

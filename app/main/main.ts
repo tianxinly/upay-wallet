@@ -11,7 +11,7 @@ const TronWeb = tronwebPkg.TronWeb || tronwebPkg.default || tronwebPkg;
 import { collectSign } from "../core/tron/collectSign";
 import { broadcast } from "../core/tron/broadcast";
 import { scanAddresses } from "../core/tron/scan";
-import { activateAddressesWithFeeWallets, getFeeWalletStates, initializeFeeWallets } from "../core/tron/feeWallet";
+import { transferTrc20, transferTrx } from "../core/tron/transfer";
 import {
   deriveHdWallet,
   deriveHdWalletByIndices,
@@ -263,6 +263,53 @@ function validateQuickCollectParams(params: any) {
   }
 }
 
+function validateTransferParams(params: any) {
+  if (!params?.fullHost) throw new Error("full_host 不能为空");
+  if (!params?.asset) throw new Error("asset 不能为空");
+  const asset = String(params.asset);
+  if (asset !== "TRX" && asset !== "USDT") {
+    throw new Error("asset 必须为 TRX 或 USDT");
+  }
+  if (!params?.to) throw new Error("目标地址不能为空");
+  if (!params?.amount) throw new Error("转账金额不能为空");
+  if (!params?.enc_mnemonic || !params?.password) {
+    throw new Error("HD 钱包解密参数缺失");
+  }
+  if (!Number.isInteger(params?.index) || params.index < 0) {
+    throw new Error("index 必须为非负整数");
+  }
+  if (params.asset === "USDT") {
+    const contract = String(params?.usdt_contract ?? "");
+    if (!contract || contract === "REPLACE_WITH_USDT_CONTRACT") {
+      throw new Error("USDT 合约地址不能为空");
+    }
+    if (!Number.isInteger(params?.decimals) || params.decimals < 0) {
+      throw new Error("decimals 必须为非负整数");
+    }
+    if (!Number.isInteger(params?.fee_limit) || params.fee_limit <= 0) {
+      throw new Error("fee_limit 必须为正整数（SUN）");
+    }
+  }
+}
+
+function normalizeTronValue(value: any) {
+  if (value === null || value === undefined) return "0";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    if (typeof value.toString === "function") return value.toString();
+    if ("_hex" in value) {
+      try {
+        return BigInt(value._hex).toString();
+      } catch {
+        return String(value._hex);
+      }
+    }
+  }
+  return String(value);
+}
+
 app.whenReady().then(() => {
   const win = createWindow();
 
@@ -467,87 +514,97 @@ app.whenReady().then(() => {
     return res;
   });
 
-  ipcMain.handle("fee:initialize", async (event, params) => {
-    const { fullHost, tron_api_key, enc_mnemonic, password, maxWallets, taskId } = params || {};
+  ipcMain.handle("wallet:getBalances", async (event, params) => {
+    const { fullHost, tron_api_key, address, usdt_contract } = params || {};
     if (!fullHost) throw new Error("full_host 不能为空");
-    if (!enc_mnemonic || !password) throw new Error("HD 钱包解密参数缺失");
-    const maxCountRaw = Number(maxWallets ?? 200);
-    const maxCount = Number.isInteger(maxCountRaw) ? maxCountRaw : 200;
-    if (maxCount < 2 || maxCount > 1000) throw new Error("maxWallets 必须在 2~1000 之间");
+    if (!address) throw new Error("address 不能为空");
+    if (!TronWeb.isAddress(address)) throw new Error("地址格式不正确");
 
-    const mnemonic = await decryptMnemonic(enc_mnemonic, password);
-    const indices = Array.from({ length: maxCount }, (_, idx) => idx);
-    const derived = deriveHdWalletByIndices(mnemonic, indices);
-    sendLog(event, `手续费钱包初始化开始: wallets=${maxCount}`);
-    const res = await initializeFeeWallets(
-      fullHost,
-      tron_api_key,
-      derived.items.map((i) => ({
-        index: i.index,
-        address: i.address,
-        privateKey: i.privateKey
-      })),
-      (p) => sendProgress(event, taskId, { stage: "fee", ...p })
-    );
-    sendLog(
-      event,
-      `手续费钱包初始化完成: before=${res.activatedCountBefore}, after=${res.activatedCountAfter}, initialized=${res.initialized}`
-    );
-    return res;
+    const tronWeb = new TronWeb(buildTronWebOptions(fullHost, tron_api_key));
+    tronWeb.setAddress(address);
+    const trxSun = normalizeTronValue(await tronWeb.trx.getBalance(address));
+    let usdtSun: string | null = null;
+    const contract = String(usdt_contract ?? "").trim();
+    if (contract && contract !== "REPLACE_WITH_USDT_CONTRACT") {
+      if (!TronWeb.isAddress(contract)) {
+        throw new Error("USDT 合约地址格式不正确");
+      }
+      const instance = await tronWeb.contract().at(contract);
+      const res = await instance.balanceOf(address).call();
+      usdtSun = normalizeTronValue(res);
+    }
+    sendLog(event, `余额查询: address=${address}`);
+    return { address, trxSun, usdtSun };
   });
 
-  ipcMain.handle("fee:activateAddresses", async (event, params) => {
-    const { fullHost, tron_api_key, enc_mnemonic, password, addresses, maxWallets, taskId } = params || {};
-    if (!fullHost) throw new Error("full_host 不能为空");
-    if (!enc_mnemonic || !password) throw new Error("HD 钱包解密参数缺失");
-    if (!Array.isArray(addresses) || addresses.length === 0) throw new Error("addresses 不能为空");
-    const maxCountRaw = Number(maxWallets ?? 200);
-    const maxCount = Number.isInteger(maxCountRaw) ? maxCountRaw : 200;
-    if (maxCount < 2 || maxCount > 1000) throw new Error("maxWallets 必须在 2~1000 之间");
-
-    const mnemonic = await decryptMnemonic(enc_mnemonic, password);
-    const indices = Array.from({ length: maxCount }, (_, idx) => idx);
-    const derived = deriveHdWalletByIndices(mnemonic, indices);
-    sendLog(event, `手续费地址激活开始: targets=${addresses.length}, wallets=${maxCount}`);
-    const res = await activateAddressesWithFeeWallets(
+  ipcMain.handle("transfer:send", async (event, params) => {
+    validateTransferParams(params);
+    const {
       fullHost,
       tron_api_key,
-      derived.items.map((i) => ({
-        index: i.index,
-        address: i.address,
-        privateKey: i.privateKey
-      })),
-      addresses,
-      (p) => sendProgress(event, taskId, { stage: "fee", ...p })
-    );
-    sendLog(
-      event,
-      `手续费地址激活完成: activated=${res.activated}, already=${res.alreadyActive}, waiting=${res.waiting}, failed=${res.failed}`
-    );
-    return res;
-  });
+      asset,
+      to,
+      amount,
+      enc_mnemonic,
+      password,
+      index,
+      from,
+      usdt_contract,
+      decimals,
+      fee_limit
+    } = params;
 
-  ipcMain.handle("fee:getStates", async (event, params) => {
-    const { fullHost, tron_api_key, enc_mnemonic, password, maxWallets } = params || {};
-    if (!fullHost) throw new Error("full_host 不能为空");
-    if (!enc_mnemonic || !password) throw new Error("HD 钱包解密参数缺失");
-    const maxCountRaw = Number(maxWallets ?? 200);
-    const maxCount = Number.isInteger(maxCountRaw) ? maxCountRaw : 200;
-    if (maxCount < 1 || maxCount > 1000) throw new Error("maxWallets 必须在 1~1000 之间");
+    if (!TronWeb.isAddress(to)) {
+      throw new Error("目标地址格式不正确");
+    }
+    if (asset === "USDT" && usdt_contract && !TronWeb.isAddress(usdt_contract)) {
+      throw new Error("USDT 合约地址格式不正确");
+    }
 
     const mnemonic = await decryptMnemonic(enc_mnemonic, password);
-    const indices = Array.from({ length: maxCount }, (_, idx) => idx);
-    const derived = deriveHdWalletByIndices(mnemonic, indices);
-    sendLog(event, `手续费地址状态查询: wallets=${maxCount}`);
-    return getFeeWalletStates(
-      fullHost,
-      tron_api_key,
-      derived.items.map((i) => ({
-        index: i.index,
-        address: i.address,
-        privateKey: i.privateKey
-      }))
-    );
+    const derived = deriveHdWalletByIndices(mnemonic, [index]);
+    const item = derived.items[0];
+    if (!item?.address || !item?.privateKey) {
+      throw new Error("派生地址失败");
+    }
+    if (from && from !== item.address) {
+      throw new Error("选择地址与派生地址不一致");
+    }
+
+    const tronWeb = new TronWeb(buildTronWebOptions(fullHost, tron_api_key));
+    sendLog(event, `转账开始: asset=${asset}, from=${item.address}, to=${to}`);
+    let txid = "";
+    if (asset === "TRX") {
+      txid = await transferTrx(tronWeb, {
+        from: item.address,
+        to,
+        privateKey: item.privateKey,
+        amount
+      });
+    } else if (asset === "USDT") {
+      const ref = await fetchRefBlock(fullHost, tron_api_key);
+      txid = await transferTrc20(tronWeb, {
+        from: item.address,
+        to,
+        privateKey: item.privateKey,
+        amount,
+        contract: usdt_contract,
+        decimals,
+        fee_limit,
+        refBlock: ref
+      });
+    } else {
+      throw new Error(`不支持的资产类型: ${String(asset)}`);
+    }
+
+    sendLog(event, `转账完成: asset=${asset}, from=${item.address}, to=${to}, txid=${txid}`);
+    return {
+      txid,
+      from: item.address,
+      to,
+      asset,
+      amount
+    };
   });
 
   ipcMain.handle("hd:generate", async (event) => {

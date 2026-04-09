@@ -1,6 +1,6 @@
 export type Progress = {
   taskId: string;
-  stage: "sign" | "broadcast" | "scan" | "refblock" | "fee";
+  stage: "sign" | "broadcast" | "scan" | "refblock";
   current: number;
   total: number;
 };

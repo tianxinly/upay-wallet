@@ -59,33 +59,28 @@ contextBridge.exposeInMainWorld("api", {
     taskId: string;
   }) =>
     ipcRenderer.invoke("scan:addresses", params),
-  feeInitialize: (params: {
+  walletGetBalances: (params: {
     fullHost: string;
     tron_api_key?: string;
-    enc_mnemonic: string;
-    password: string;
-    maxWallets?: number;
-    taskId: string;
+    address: string;
+    usdt_contract?: string;
   }) =>
-    ipcRenderer.invoke("fee:initialize", params),
-  feeActivateAddresses: (params: {
+    ipcRenderer.invoke("wallet:getBalances", params),
+  transferSend: (params: {
     fullHost: string;
     tron_api_key?: string;
+    asset: "TRX" | "USDT";
+    to: string;
+    amount: string;
     enc_mnemonic: string;
     password: string;
-    addresses: string[];
-    maxWallets?: number;
-    taskId: string;
+    index: number;
+    from?: string;
+    usdt_contract?: string;
+    decimals?: number;
+    fee_limit?: number;
   }) =>
-    ipcRenderer.invoke("fee:activateAddresses", params),
-  feeGetStates: (params: {
-    fullHost: string;
-    tron_api_key?: string;
-    enc_mnemonic: string;
-    password: string;
-    maxWallets?: number;
-  }) =>
-    ipcRenderer.invoke("fee:getStates", params),
+    ipcRenderer.invoke("transfer:send", params),
 
   hdGenerate: () => ipcRenderer.invoke("hd:generate"),
   hdFromMnemonic: (params: { mnemonic: string }) => ipcRenderer.invoke("hd:fromMnemonic", params),

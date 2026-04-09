@@ -66,85 +66,35 @@ declare global {
         threshold: string;
         taskId: string;
       }) => Promise<any>;
-      feeInitialize: (params: {
+      walletGetBalances: (params: {
         fullHost: string;
         tron_api_key?: string;
-        enc_mnemonic: string;
-        password: string;
-        maxWallets?: number;
-        taskId: string;
+        address: string;
+        usdt_contract?: string;
       }) => Promise<{
-        initialized: boolean;
-        activatedCountBefore: number;
-        activatedCountAfter: number;
-        steps: {
-          fromIndex: number;
-          from: string;
-          toIndex: number;
-          to: string;
-          freeBandwidth: number;
-          balanceSun: string;
-          amountSun: string;
-          status: "sent" | "skipped" | "failed";
-          reason?: string;
-          txid?: string;
-        }[];
-        shareSun: string;
-        addressStates: {
-          index: number;
-          address: string;
-          activated: boolean;
-          balanceSun: string;
-          freeBandwidth: number;
-        }[];
+        address: string;
+        trxSun: string;
+        usdtSun?: string | null;
       }>;
-      feeActivateAddresses: (params: {
+      transferSend: (params: {
         fullHost: string;
         tron_api_key?: string;
+        asset: "TRX" | "USDT";
+        to: string;
+        amount: string;
         enc_mnemonic: string;
         password: string;
-        addresses: string[];
-        maxWallets?: number;
-        taskId: string;
+        index: number;
+        from?: string;
+        usdt_contract?: string;
+        decimals?: number;
+        fee_limit?: number;
       }) => Promise<{
-        total: number;
-        activated: number;
-        alreadyActive: number;
-        waiting: number;
-        failed: number;
-        steps: {
-          address: string;
-          fromIndex?: number;
-          fromAddress?: string;
-          status: "activated" | "already_active" | "waiting" | "failed";
-          reason?: string;
-          txid?: string;
-        }[];
-        feeWalletStates: {
-          index: number;
-          address: string;
-          activated: boolean;
-          balanceSun: string;
-          freeBandwidth: number;
-        }[];
-      }>;
-      feeGetStates: (params: {
-        fullHost: string;
-        tron_api_key?: string;
-        enc_mnemonic: string;
-        password: string;
-        maxWallets?: number;
-      }) => Promise<{
-        total: number;
-        activatedCount: number;
-        inactiveCount: number;
-        addressStates: {
-          index: number;
-          address: string;
-          activated: boolean;
-          balanceSun: string;
-          freeBandwidth: number;
-        }[];
+        txid: string;
+        from: string;
+        to: string;
+        asset: string;
+        amount: string;
       }>;
       hdGenerate: () => Promise<{
         mnemonic: string;

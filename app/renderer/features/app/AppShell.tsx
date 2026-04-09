@@ -4,7 +4,6 @@ import { decryptSecret, derivePasswordHash, encryptSecret, fromBase64, toBase64 
 import { decodeMaybeBase64, decodeMaybeHex, formatBroadcastErrors } from "../../shared/parsers/broadcast";
 import { parseAddressAmountCsv, parseAddressCsv } from "../../shared/parsers/csv";
 import AuthScreen from "../auth/AuthScreen";
-import FeeWalletTab from "../fee/FeeWalletTab";
 import {
   AppConfig,
   CollectionAddress,
@@ -14,9 +13,6 @@ import {
   PendingWallet,
   Progress
 } from "../../shared/types/app";
-
-const FEE_INIT_STORAGE_KEY = "tws:fee-init-v1";
-const FEE_WALLET_SCAN_MAX = 200;
 
 function randomId() {
   return crypto.randomUUID();
@@ -89,24 +85,9 @@ function mergeSecureIntoConfig(base: AppConfig, secure: any): AppConfig {
   };
 }
 
-function loadFeeInitMap(): Record<string, boolean> {
-  try {
-    const raw = localStorage.getItem(FEE_INIT_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const out: Record<string, boolean> = {};
-    for (const [k, v] of Object.entries(parsed)) out[String(k)] = Boolean(v);
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<
-    "overview" | "sign" | "quick" | "refblock" | "broadcast" | "scan" | "wallet" | "fee"
+    "overview" | "sign" | "quick" | "transfer" | "refblock" | "broadcast" | "scan" | "wallet"
   >("overview");
   const [appInfo, setAppInfo] = useState<{ version: string; platform: string; userDataPath: string } | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -159,14 +140,19 @@ export default function App() {
   const [scanOverCsv, setScanOverCsv] = useState<string>("");
   const [scanLoading, setScanLoading] = useState(false);
 
-  // 手续费钱包（分裂激活）
-  const [feePassword, setFeePassword] = useState("");
-  const [feeResult, setFeeResult] = useState("");
-  const [feeLoading, setFeeLoading] = useState(false);
-  const [feeAddressPreview, setFeeAddressPreview] = useState<string[]>([]);
-  const [feePreviewLoading, setFeePreviewLoading] = useState(false);
-  const [feeActivateAddressInput, setFeeActivateAddressInput] = useState("");
-  const [feeInitMap, setFeeInitMap] = useState<Record<string, boolean>>(() => loadFeeInitMap());
+  // 转账
+  const [transferAsset, setTransferAsset] = useState<"TRX" | "USDT">("USDT");
+  const [transferToAddress, setTransferToAddress] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [transferPassword, setTransferPassword] = useState("");
+  const [transferLoading, setTransferLoading] = useState(false);
+  const [transferResult, setTransferResult] = useState("");
+  const [transferPreviewLoading, setTransferPreviewLoading] = useState(false);
+  const [transferAddressPreview, setTransferAddressPreview] = useState<Array<{ index: number; address: string }>>([]);
+  const [transferIndex, setTransferIndex] = useState(0);
+  const [transferBalanceLoading, setTransferBalanceLoading] = useState(false);
+  const [transferBalances, setTransferBalances] = useState<{ trx: string; usdt: string | null } | null>(null);
+  const [transferBalanceError, setTransferBalanceError] = useState("");
 
   // 钱包管理
   const [walletName, setWalletName] = useState("");
@@ -276,14 +262,6 @@ export default function App() {
       // ignore persistence errors
     });
   }, [config, secureReady]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(FEE_INIT_STORAGE_KEY, JSON.stringify(feeInitMap));
-    } catch {
-      // ignore storage errors
-    }
-  }, [feeInitMap]);
 
   useEffect(() => {
     if (!config.auth_password_hash) {
@@ -415,24 +393,36 @@ export default function App() {
   }, [config.hd_wallets]);
 
   useEffect(() => {
-    if (activeTab !== "fee") return;
+    if (activeTab !== "transfer") return;
     if (!selectedWallet?.xpub) {
-      setFeeAddressPreview([]);
+      setTransferAddressPreview([]);
+      setTransferBalances(null);
+      setTransferBalanceError("");
       return;
     }
     let cancelled = false;
     async function loadPreview() {
-      setFeePreviewLoading(true);
+      setTransferPreviewLoading(true);
       try {
         const indices = Array.from({ length: 20 }, (_, idx) => idx);
         const res = await window.api.hdDeriveXpub({ xpub: selectedWallet.xpub, indices });
         if (cancelled) return;
-        const addresses = Array.isArray(res?.items) ? res.items.map((i: any) => String(i.address || "")).filter(Boolean) : [];
-        setFeeAddressPreview(addresses.slice(0, 20));
+        const items = Array.isArray(res?.items)
+          ? res.items
+              .map((i: any) => ({
+                index: Number(i.index),
+                address: String(i.address || "")
+              }))
+              .filter((i: any) => Number.isInteger(i.index) && i.address)
+          : [];
+        setTransferAddressPreview(items);
+        if (items.length > 0 && !items.some((i: any) => i.index === transferIndex)) {
+          setTransferIndex(items[0].index);
+        }
       } catch {
-        if (!cancelled) setFeeAddressPreview([]);
+        if (!cancelled) setTransferAddressPreview([]);
       } finally {
-        if (!cancelled) setFeePreviewLoading(false);
+        if (!cancelled) setTransferPreviewLoading(false);
       }
     }
     loadPreview();
@@ -440,6 +430,24 @@ export default function App() {
       cancelled = true;
     };
   }, [activeTab, selectedWallet?.xpub]);
+
+  useEffect(() => {
+    if (activeTab !== "transfer") return;
+    const item = transferAddressPreview.find((i) => i.index === transferIndex);
+    if (!item?.address) {
+      setTransferBalances(null);
+      return;
+    }
+    fetchTransferBalances(item.address);
+  }, [
+    activeTab,
+    transferIndex,
+    transferAddressPreview,
+    config.full_host,
+    config.tron_api_key,
+    config.usdt_contract,
+    config.decimals
+  ]);
 
   function updateConfig<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
     setConfig((prev) => ({ ...prev, [key]: value }));
@@ -453,6 +461,68 @@ export default function App() {
     if (!address) return "";
     if (address.length <= 12) return address;
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  }
+
+  function formatUnits(value: string, decimals: number) {
+    try {
+      const v = BigInt(value || "0");
+      const sign = v < 0n ? "-" : "";
+      const abs = v < 0n ? -v : v;
+      if (decimals <= 0) return `${sign}${abs.toString()}`;
+      const base = 10n ** BigInt(decimals);
+      const intPart = abs / base;
+      const fracPart = abs % base;
+      const fracRaw = fracPart.toString().padStart(decimals, "0");
+      const frac = fracRaw.replace(/0+$/, "");
+      return frac ? `${sign}${intPart.toString()}.${frac}` : `${sign}${intPart.toString()}`;
+    } catch {
+      return value || "0";
+    }
+  }
+
+  function parseUnits(value: string, decimals: number) {
+    const s = String(value || "").trim();
+    if (!/^\d+(\.\d+)?$/.test(s)) {
+      throw new Error("金额格式不正确");
+    }
+    const [i, f = ""] = s.split(".");
+    if (f.length > decimals) {
+      throw new Error(`金额小数位过多，最多 ${decimals} 位`);
+    }
+    const frac = f.padEnd(decimals, "0");
+    return BigInt(i + frac);
+  }
+
+  async function fetchTransferBalances(address: string) {
+    if (!config.full_host) {
+      setTransferBalances(null);
+      setTransferBalanceError("full_host 未设置");
+      return;
+    }
+    setTransferBalanceLoading(true);
+    setTransferBalanceError("");
+    try {
+      const contract =
+        config.usdt_contract && config.usdt_contract !== "REPLACE_WITH_USDT_CONTRACT"
+          ? config.usdt_contract
+          : undefined;
+      const res = await window.api.walletGetBalances({
+        fullHost: config.full_host,
+        tron_api_key: config.tron_api_key,
+        address,
+        usdt_contract: contract
+      });
+      setTransferBalances({
+        trx: res.trxSun ?? "0",
+        usdt: res.usdtSun ?? null
+      });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setTransferBalances(null);
+      setTransferBalanceError(msg);
+    } finally {
+      setTransferBalanceLoading(false);
+    }
   }
 
   function openCollectionSettings() {
@@ -1369,215 +1439,156 @@ export default function App() {
     setScanResult(`已导出：${file.filePath}`);
   }
 
-  async function handleRefreshFeePreview() {
+  async function handleRefreshTransferPreview() {
     if (!selectedWallet?.xpub) {
-      setFeeAddressPreview([]);
+      setTransferAddressPreview([]);
       return;
     }
-    setFeePreviewLoading(true);
+    setTransferPreviewLoading(true);
     try {
       const indices = Array.from({ length: 20 }, (_, idx) => idx);
       const res = await window.api.hdDeriveXpub({ xpub: selectedWallet.xpub, indices });
-      const addresses = Array.isArray(res?.items) ? res.items.map((i: any) => String(i.address || "")).filter(Boolean) : [];
-      setFeeAddressPreview(addresses.slice(0, 20));
+      const items = Array.isArray(res?.items)
+        ? res.items
+            .map((i: any) => ({
+              index: Number(i.index),
+              address: String(i.address || "")
+            }))
+            .filter((i: any) => Number.isInteger(i.index) && i.address)
+        : [];
+      setTransferAddressPreview(items);
+      if (items.length > 0 && !items.some((i: any) => i.index === transferIndex)) {
+        setTransferIndex(items[0].index);
+      }
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      setFeeResult(msg);
+      setTransferResult(msg);
       reportError(msg);
     } finally {
-      setFeePreviewLoading(false);
+      setTransferPreviewLoading(false);
     }
   }
 
-  async function handleGetFeeWalletStates() {
-    if (feeLoading) return;
-    setFeeResult("");
+  async function handleSendTransfer() {
+    if (transferLoading) return;
+    setTransferLoading(true);
+    setTransferResult("");
     setErrorMessage("");
     if (!selectedWallet) {
       const msg = "请先在钱包管理中创建并选择 HD 钱包";
-      setFeeResult(msg);
+      setTransferResult(msg);
       reportError(msg);
+      setTransferLoading(false);
+      return;
+    }
+    if (!transferPassword.trim()) {
+      const msg = "请填写 HD 钱包解密密码";
+      setTransferResult(msg);
+      reportError(msg);
+      setTransferLoading(false);
       return;
     }
     if (!config.full_host) {
       const msg = "full_host 未设置，请在设置中填写";
-      setFeeResult(msg);
+      setTransferResult(msg);
       reportError(msg);
+      setTransferLoading(false);
       return;
     }
-    if (!feePassword.trim()) {
-      const msg = "请填写 HD 钱包解密密码";
-      setFeeResult(msg);
+    const to = transferToAddress.trim();
+    if (!to) {
+      const msg = "请填写目标地址";
+      setTransferResult(msg);
       reportError(msg);
+      setTransferLoading(false);
       return;
     }
-
-    setFeeLoading(true);
+    const amount = transferAmount.trim();
+    if (!amount) {
+      const msg = "请填写转账金额";
+      setTransferResult(msg);
+      reportError(msg);
+      setTransferLoading(false);
+      return;
+    }
     try {
-      const res = await window.api.feeGetStates({
-        fullHost: config.full_host,
-        tron_api_key: config.tron_api_key,
-        enc_mnemonic: selectedWallet.enc_mnemonic,
-        password: feePassword.trim(),
-        maxWallets: FEE_WALLET_SCAN_MAX
-      });
-      const lines = (res.addressStates || []).map(
-        (s) => `${s.index},${s.address},activated=${s.activated ? "yes" : "no"},balanceSun=${s.balanceSun},freeBW=${s.freeBandwidth}`
-      );
-      const summary = `连续已激活地址数=${res.activatedCount}（遇到未激活地址已停止查询）`;
-      setFeeResult(`${summary}\n\n地址状态:\n${lines.join("\n")}`);
-      await handleRefreshFeePreview();
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      setFeeResult(msg);
-      reportError(msg);
-    } finally {
-      setFeeLoading(false);
-    }
-  }
-
-  function parseActivateAddressInput(text: string) {
-    return Array.from(
-      new Set(
-        text
-          .split(/\r?\n|,|，|\s+/)
-          .map((v) => v.trim())
-          .filter(Boolean)
-      )
-    );
-  }
-
-  async function handleInitializeFeeWallet() {
-    if (feeLoading) return;
-    setFeeResult("");
-    setErrorMessage("");
-    if (!selectedWallet) {
-      const msg = "请先在钱包管理中创建并选择 HD 钱包";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    if (!config.full_host) {
-      const msg = "full_host 未设置，请在设置中填写";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    if (!feePassword.trim()) {
-      const msg = "请填写 HD 钱包解密密码";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    setFeeLoading(true);
-    try {
-      const taskId = randomId();
-      const res = await window.api.feeInitialize({
-        fullHost: config.full_host,
-        tron_api_key: config.tron_api_key,
-        enc_mnemonic: selectedWallet.enc_mnemonic,
-        password: feePassword.trim(),
-        maxWallets: FEE_WALLET_SCAN_MAX,
-        taskId
-      });
-      const sent = res.steps.filter((s) => s.status === "sent").length;
-      const skipped = res.steps.filter((s) => s.status === "skipped").length;
-      const failed = res.steps.filter((s) => s.status === "failed").length;
-      const stepLines = res.steps.map((s) => {
-        const head = `${s.fromIndex}->${s.toIndex} ${s.from} => ${s.to}`;
-        const reason = s.reason ? String(decodeMaybeHex(decodeMaybeBase64(String(s.reason)))) : "";
-        if (s.status === "sent") return `${head} | sent | amountSun=${s.amountSun} | txid=${s.txid ?? ""}`;
-        return `${head} | ${s.status} | reason=${reason}`;
-      });
-      const stateLines = (res.addressStates || []).map(
-        (s) => `${s.index},${s.address},activated=${s.activated ? "yes" : "no"},balanceSun=${s.balanceSun},freeBW=${s.freeBandwidth}`
-      );
-      const summary =
-        `初始化结果: initialized=${res.initialized ? "yes" : "no"}\n` +
-        `激活数量: ${res.activatedCountBefore} -> ${res.activatedCountAfter}\n` +
-        `单次激活金额: ${res.shareSun} sun\n` +
-        `结果: sent=${sent}, skipped=${skipped}, failed=${failed}`;
-      const details = stepLines.length > 0 ? `\n\n执行明细:\n${stepLines.join("\n")}` : "\n\n本次无需执行转账";
-      const states = stateLines.length > 0 ? `\n\n地址状态:\n${stateLines.join("\n")}` : "";
-      setFeeResult(`${summary}${details}${states}`);
-      await handleRefreshFeePreview();
-    } catch (e: any) {
-      const msg = e?.message ?? String(e);
-      setFeeResult(msg);
-      reportError(msg);
-    } finally {
-      setFeeLoading(false);
-    }
-  }
-
-  async function handleActivateAddresses() {
-    if (feeLoading) return;
-    setFeeResult("");
-    setErrorMessage("");
-    if (!selectedWallet) {
-      const msg = "请先在钱包管理中创建并选择 HD 钱包";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    if (!config.full_host) {
-      const msg = "full_host 未设置，请在设置中填写";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    if (!feePassword.trim()) {
-      const msg = "请填写 HD 钱包解密密码";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-    const addresses = parseActivateAddressInput(feeActivateAddressInput);
-    if (addresses.length === 0) {
-      const msg = "请输入待激活地址列表（每行一个地址）";
-      setFeeResult(msg);
-      reportError(msg);
-      return;
-    }
-
-    setFeeLoading(true);
-    try {
-      const taskId = randomId();
-      const res = await window.api.feeActivateAddresses({
-        fullHost: config.full_host,
-        tron_api_key: config.tron_api_key,
-        enc_mnemonic: selectedWallet.enc_mnemonic,
-        password: feePassword.trim(),
-        addresses,
-        maxWallets: FEE_WALLET_SCAN_MAX,
-        taskId
-      });
-      const stepLines = res.steps.map((s) => {
-        const reason = s.reason ? String(decodeMaybeHex(decodeMaybeBase64(String(s.reason)))) : "";
-        if (s.status === "activated") {
-          return `${s.address} | activated | from=${s.fromIndex}:${s.fromAddress ?? ""} | txid=${s.txid ?? ""}`;
+      const decimals = transferAsset === "USDT" ? config.decimals : 6;
+      const amountSun = parseUnits(amount, decimals);
+      if (transferAsset === "USDT") {
+        if (transferBalances?.usdt != null) {
+          const balanceSun = BigInt(transferBalances.usdt || "0");
+          if (amountSun > balanceSun) {
+            const msg = "USDT 余额不足";
+            setTransferResult(msg);
+            reportError(msg);
+            setTransferLoading(false);
+            return;
+          }
         }
-        return `${s.address} | ${s.status} | ${reason}`;
-      });
-      const walletLines = (res.feeWalletStates || []).map(
-        (s) => `${s.index},${s.address},activated=${s.activated ? "yes" : "no"},balanceSun=${s.balanceSun},freeBW=${s.freeBandwidth}`
-      );
-      const waitHint =
-        res.waiting > 0
-          ? "\n\n等待建议:\n1. 免费带宽通常会在约 24 小时内恢复\n2. 可先给手续费钱包补充 TRX\n3. 稍后重新点击“激活输入地址”继续未完成项"
-          : "";
-      const summary =
-        `总地址=${res.total}, activated=${res.activated}, already_active=${res.alreadyActive}, waiting=${res.waiting}, failed=${res.failed}`;
-      setFeeResult(
-        `${summary}\n\n执行明细:\n${stepLines.join("\n")}\n\n手续费钱包状态:\n${walletLines.join("\n")}${waitHint}`
-      );
-      await handleRefreshFeePreview();
+      } else {
+        if (transferBalances?.trx != null) {
+          const balanceSun = BigInt(transferBalances.trx || "0");
+          if (amountSun > balanceSun) {
+            const msg = "TRX 余额不足";
+            setTransferResult(msg);
+            reportError(msg);
+            setTransferLoading(false);
+            return;
+          }
+        }
+      }
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      setFeeResult(msg);
+      setTransferResult(msg);
+      reportError(msg);
+      setTransferLoading(false);
+      return;
+    }
+    const fromItem = transferAddressPreview.find((i) => i.index === transferIndex);
+    if (!fromItem) {
+      const msg = "请选择发送地址";
+      setTransferResult(msg);
+      reportError(msg);
+      setTransferLoading(false);
+      return;
+    }
+    if (transferAsset === "USDT") {
+      if (!config.usdt_contract || config.usdt_contract === "REPLACE_WITH_USDT_CONTRACT") {
+        const msg = "USDT 合约地址未设置，请在设置中填写";
+        setTransferResult(msg);
+        reportError(msg);
+        setTransferLoading(false);
+        return;
+      }
+    }
+    try {
+      const res = await window.api.transferSend({
+        fullHost: config.full_host,
+        tron_api_key: config.tron_api_key,
+        asset: transferAsset,
+        to,
+        amount,
+        enc_mnemonic: selectedWallet.enc_mnemonic,
+        password: transferPassword.trim(),
+        index: transferIndex,
+        from: fromItem.address,
+        usdt_contract: transferAsset === "USDT" ? config.usdt_contract : undefined,
+        decimals: transferAsset === "USDT" ? config.decimals : undefined,
+        fee_limit: transferAsset === "USDT" ? config.fee_limit : undefined
+      });
+      const summary =
+        `转账成功: ${res.asset} ${res.amount}\n` +
+        `from=${res.from}\n` +
+        `to=${res.to}\n` +
+        `txid=${res.txid}`;
+      setTransferResult(summary);
+      await fetchTransferBalances(fromItem.address);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setTransferResult(msg);
       reportError(msg);
     } finally {
-      setFeeLoading(false);
+      setTransferLoading(false);
     }
   }
 
@@ -1680,6 +1691,9 @@ export default function App() {
           <button className={activeTab === "quick" ? "active online" : "online"} onClick={() => setActiveTab("quick")}>
             快捷归集
           </button>
+          <button className={activeTab === "transfer" ? "active online" : "online"} onClick={() => setActiveTab("transfer")}>
+            转账
+          </button>
           <button className={activeTab === "refblock" ? "active online" : "online"} onClick={() => setActiveTab("refblock")}>
             区块引用
           </button>
@@ -1688,9 +1702,6 @@ export default function App() {
           </button>
           <button className={activeTab === "scan" ? "active online" : "online"} onClick={() => setActiveTab("scan")}>
             扫描统计
-          </button>
-          <button className={activeTab === "fee" ? "active online" : "online"} onClick={() => setActiveTab("fee")}>
-            手续费钱包
           </button>
         </div>
       </nav>
@@ -2066,28 +2077,120 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === "fee" && (
-          <FeeWalletTab
-            wallets={config.hd_wallets}
-            selectedWalletId={selectedWalletId}
-            setSelectedWalletId={setSelectedWalletId}
-            shortXpub={shortXpub}
-            setActiveTabWallet={() => setActiveTab("wallet")}
-            feePassword={feePassword}
-            setFeePassword={setFeePassword}
-            handleRefreshFeePreview={handleRefreshFeePreview}
-            handleGetFeeWalletStates={handleGetFeeWalletStates}
-            feePreviewLoading={feePreviewLoading}
-            fullHost={config.full_host}
-            feeAddressPreview={feeAddressPreview}
-            showInitializeButton
-            handleInitializeFeeWallet={handleInitializeFeeWallet}
-            activateAddressInput={feeActivateAddressInput}
-            setActivateAddressInput={setFeeActivateAddressInput}
-            handleActivateAddresses={handleActivateAddresses}
-            feeLoading={feeLoading}
-            feeResult={feeResult}
-          />
+        {activeTab === "transfer" && (
+          <section className="panel">
+            <h2>转账</h2>
+            <div className="hint">选择钱包地址，转账 TRX 或 USDT 到目标地址。</div>
+            <div className="grid">
+              <label>
+                选择 HD 钱包
+                {config.hd_wallets.length === 0 ? (
+                  <div className="empty-inline">
+                    <span>未创建 HD 钱包</span>
+                    <button onClick={() => setActiveTab("wallet")}>去钱包管理</button>
+                  </div>
+                ) : (
+                  <div className="select-row">
+                    <select value={selectedWalletId} onChange={(e) => setSelectedWalletId(e.target.value)}>
+                      {config.hd_wallets.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} · {shortXpub(item.xpub)}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={() => setActiveTab("wallet")}>管理</button>
+                  </div>
+                )}
+              </label>
+              <label>
+                发送地址（0~19）
+                {transferAddressPreview.length === 0 ? (
+                  <div className="empty-inline">
+                    <span>暂无地址预览</span>
+                    <button onClick={handleRefreshTransferPreview} disabled={transferPreviewLoading}>
+                      {transferPreviewLoading ? "刷新中..." : "刷新地址"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="select-row">
+                    <select value={String(transferIndex)} onChange={(e) => setTransferIndex(Number(e.target.value))}>
+                      {transferAddressPreview.map((item) => (
+                        <option key={item.index} value={item.index}>
+                          {item.index} · {shortAddress(item.address)}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={handleRefreshTransferPreview} disabled={transferPreviewLoading}>
+                      {transferPreviewLoading ? "刷新中..." : "刷新地址"}
+                    </button>
+                  </div>
+                )}
+                {transferAddressPreview.length > 0 && (
+                  <div className="hint">
+                    发送地址：
+                    {transferAddressPreview.find((i) => i.index === transferIndex)?.address || ""}
+                  </div>
+                )}
+                {transferAddressPreview.length > 0 && (
+                  <div className="hint">
+                    {transferBalanceLoading
+                      ? "余额查询中..."
+                      : transferBalanceError
+                      ? `余额获取失败：${transferBalanceError}`
+                      : `余额：TRX ${formatUnits(transferBalances?.trx ?? "0", 6)} / USDT ${
+                          transferBalances?.usdt == null
+                            ? "-"
+                            : formatUnits(transferBalances.usdt, config.decimals)
+                        }`}
+                  </div>
+                )}
+              </label>
+              <label>
+                HD 钱包解密密码
+                <input
+                  type="password"
+                  value={transferPassword}
+                  onChange={(e) => setTransferPassword(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="transfer-row">
+              <label>
+                目标地址
+                <input value={transferToAddress} onChange={(e) => setTransferToAddress(e.target.value)} />
+              </label>
+              <label>
+                选择资产
+                <div className="toggle-group">
+                  <button
+                    type="button"
+                    className={transferAsset === "TRX" ? "toggle-button active" : "toggle-button"}
+                    onClick={() => setTransferAsset("TRX")}
+                  >
+                    TRX
+                  </button>
+                  <button
+                    type="button"
+                    className={transferAsset === "USDT" ? "toggle-button active" : "toggle-button"}
+                    onClick={() => setTransferAsset("USDT")}
+                  >
+                    USDT
+                  </button>
+                </div>
+              </label>
+              <label>
+                转账金额
+                <input value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} />
+              </label>
+            </div>
+            <div className="row">
+              <button className="primary" onClick={handleSendTransfer} disabled={transferLoading}>
+                {transferLoading ? "转账中..." : "发起转账"}
+              </button>
+            </div>
+            <div className="hint">当前节点：{config.full_host || "(未配置)"}</div>
+            {transferResult && <pre className="result">{transferResult}</pre>}
+          </section>
         )}
 
         {activeTab === "wallet" && (

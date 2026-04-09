@@ -41,6 +41,7 @@
   "build": {
     "appId": "com.company.upaywallet",
     "productName": "upay-wallet",
+    "artifactName": "upay-wallet-${os}-${arch}.${ext}",
     "files": [
       "electron-dist/**",
       "dist/**",
