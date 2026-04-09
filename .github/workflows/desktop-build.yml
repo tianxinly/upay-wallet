@@ -45,9 +45,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "mac" ]; then
-            npx electron-builder --mac --${{ matrix.arch }}
+            npx electron-builder --mac --${{ matrix.arch }} --publish=never
           else
-            npx electron-builder --win --${{ matrix.arch }}
+            npx electron-builder --win --${{ matrix.arch }} --publish=never
           fi
 
       - name: Upload Artifacts
