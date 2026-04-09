@@ -4,6 +4,7 @@ import { decryptSecret, derivePasswordHash, encryptSecret, fromBase64, toBase64 
 import { decodeMaybeBase64, decodeMaybeHex, formatBroadcastErrors } from "../../shared/parsers/broadcast";
 import { parseAddressAmountCsv, parseAddressCsv } from "../../shared/parsers/csv";
 import AuthScreen from "../auth/AuthScreen";
+import SetupPasswordScreen from "../auth/SetupPasswordScreen";
 import {
   AppConfig,
   CollectionAddress,
@@ -74,6 +75,9 @@ function mergeSecureIntoConfig(base: AppConfig, secure: any): AppConfig {
   return {
     ...base,
     tron_api_key: String(secure?.tron_api_key ?? base.tron_api_key ?? ""),
+    auth_password_initialized: Boolean(
+      base.auth_password_initialized || secure?.auth_password_hash || base.auth_password_hash
+    ),
     auth_password_hash: String(secure?.auth_password_hash ?? base.auth_password_hash ?? ""),
     auth_password_salt: String(secure?.auth_password_salt ?? base.auth_password_salt ?? ""),
     auth_password_iters: Number(secure?.auth_password_iters ?? base.auth_password_iters ?? 100_000),
@@ -693,6 +697,7 @@ export default function App() {
       const hash = await derivePasswordHash(securityNewPassword, salt, iters);
       setConfig((prev) => ({
         ...prev,
+        auth_password_initialized: true,
         auth_password_hash: hash,
         auth_password_salt: toBase64(salt),
         auth_password_iters: iters
@@ -720,6 +725,7 @@ export default function App() {
       }
       setConfig((prev) => ({
         ...prev,
+        auth_password_initialized: true,
         auth_password_hash: "",
         auth_password_salt: "",
         auth_password_iters: 100_000
@@ -1599,6 +1605,21 @@ export default function App() {
           <div className="hint">正在加载安全配置...</div>
         </div>
       </div>
+    );
+  }
+
+  const needsInitialPassword = !config.auth_password_hash && !config.auth_password_initialized;
+
+  if (needsInitialPassword) {
+    return (
+      <SetupPasswordScreen
+        password={securityNewPassword}
+        confirmPassword={securityNewPasswordConfirm}
+        error={securityResult}
+        onPasswordChange={setSecurityNewPassword}
+        onConfirmChange={setSecurityNewPasswordConfirm}
+        onSubmit={handleSetLoginPassword}
+      />
     );
   }
 

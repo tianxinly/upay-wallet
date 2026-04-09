@@ -49,6 +49,7 @@ export function loadConfigFromStorage(): AppConfig {
       fee_limit: Number(parsed.fee_limit ?? DEFAULT_CONFIG.fee_limit),
       collection_addresses,
       hd_wallets,
+      auth_password_initialized: Boolean(parsed.auth_password_initialized ?? DEFAULT_CONFIG.auth_password_initialized),
       auth_password_hash: String(parsed.auth_password_hash ?? DEFAULT_CONFIG.auth_password_hash),
       auth_password_salt: String(parsed.auth_password_salt ?? DEFAULT_CONFIG.auth_password_salt),
       auth_password_iters: Number(parsed.auth_password_iters ?? DEFAULT_CONFIG.auth_password_iters),

@@ -38,6 +38,7 @@ export type AppConfig = {
   fee_limit: number;
   collection_addresses: CollectionAddress[];
   hd_wallets: HdWallet[];
+  auth_password_initialized: boolean;
   auth_password_hash: string;
   auth_password_salt: string;
   auth_password_iters: number;
@@ -70,6 +71,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   fee_limit: 100000000,
   collection_addresses: [],
   hd_wallets: [],
+  auth_password_initialized: false,
   auth_password_hash: "",
   auth_password_salt: "",
   auth_password_iters: 100_000,
