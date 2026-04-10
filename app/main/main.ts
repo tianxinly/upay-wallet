@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import { webcrypto } from "node:crypto";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 declare const require: NodeRequire;
@@ -21,6 +22,7 @@ import {
 } from "../core/tron/hdWallet";
 
 const ENC_PREFIX = "enc:v1:";
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 
 function fromBase64(text: string) {
   return new Uint8Array(Buffer.from(text, "base64"));
@@ -80,7 +82,7 @@ function createLogger() {
   return {
     path: logPath,
     write(line: string) {
-      fs.appendFileSync(logPath, `${new Date().toISOString()} ${line}\n`, "utf8");
+      fs.appendFile(logPath, `${new Date().toISOString()} ${line}\n`, "utf8", () => {});
     }
   };
 }
@@ -91,34 +93,43 @@ function getSecureConfigPath() {
   return path.join(app.getPath("userData"), "secure-config.json");
 }
 
-function saveSecureConfig(data: Record<string, any>) {
+async function saveSecureConfig(data: Record<string, any>) {
   const text = JSON.stringify(data ?? {});
   const securePath = getSecureConfigPath();
-  fs.mkdirSync(path.dirname(securePath), { recursive: true });
-  if (safeStorage.isEncryptionAvailable()) {
-    const encrypted = safeStorage.encryptString(text);
-    const payload = `safe:v1:${encrypted.toString("base64")}`;
-    fs.writeFileSync(securePath, payload, "utf8");
-    return;
+  await fsp.mkdir(path.dirname(securePath), { recursive: true });
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { saved: false, reason: "安全存储不可用，已跳过敏感配置落盘" };
   }
-  fs.writeFileSync(securePath, text, "utf8");
+  const encrypted = safeStorage.encryptString(text);
+  const payload = `safe:v1:${encrypted.toString("base64")}`;
+  await fsp.writeFile(securePath, payload, "utf8");
+  return { saved: true };
 }
 
-function loadSecureConfig() {
+async function loadSecureConfig() {
   try {
     const securePath = getSecureConfigPath();
-    if (!fs.existsSync(securePath)) return {};
-    const raw = fs.readFileSync(securePath, "utf8");
-    if (!raw.trim()) return {};
+    if (!fs.existsSync(securePath)) return { data: {} };
+    const raw = await fsp.readFile(securePath, "utf8");
+    if (!raw.trim()) return { data: {} };
     if (raw.startsWith("safe:v1:")) {
-      if (!safeStorage.isEncryptionAvailable()) return {};
+      if (!safeStorage.isEncryptionAvailable()) {
+        return { data: {}, warning: "安全存储不可用，无法解密已加密配置" };
+      }
       const b64 = raw.slice("safe:v1:".length);
       const decrypted = safeStorage.decryptString(Buffer.from(b64, "base64"));
-      return JSON.parse(decrypted);
+      return { data: JSON.parse(decrypted) };
     }
-    return JSON.parse(raw);
+    if (!safeStorage.isEncryptionAvailable()) {
+      return { data: {}, warning: "发现历史明文配置，但安全存储不可用，已忽略" };
+    }
+    const parsed = JSON.parse(raw);
+    const encrypted = safeStorage.encryptString(JSON.stringify(parsed ?? {}));
+    const payload = `safe:v1:${encrypted.toString("base64")}`;
+    await fsp.writeFile(securePath, payload, "utf8");
+    return { data: parsed ?? {}, warning: "已检测到历史明文配置并完成加密迁移" };
   } catch {
-    return {};
+    return { data: {}, warning: "安全配置读取失败，已忽略" };
   }
 }
 
@@ -196,6 +207,14 @@ function resolveOutputPath(filePath: string | undefined, defaultName: string) {
     return path.join(base, defaultName);
   }
   return path.isAbsolute(filePath) ? filePath : path.join(base, filePath);
+}
+
+async function readTextFileWithLimit(filePath: string) {
+  const stat = await fsp.stat(filePath);
+  if (stat.size > MAX_IMPORT_BYTES) {
+    throw new Error(`文件过大，超过 ${Math.floor(MAX_IMPORT_BYTES / 1024 / 1024)}MB`);
+  }
+  return await fsp.readFile(filePath, "utf8");
 }
 
 function createFileToken() {
@@ -323,10 +342,20 @@ app.whenReady().then(() => {
     platform: process.platform
   }));
 
-  ipcMain.handle("secure:load", () => loadSecureConfig());
-  ipcMain.handle("secure:save", async (_event, data) => {
-    saveSecureConfig(data ?? {});
-    return true;
+  ipcMain.handle("secure:load", async (event) => {
+    const res = await loadSecureConfig();
+    if (res.warning) sendLog(event, res.warning);
+    return res.data;
+  });
+  ipcMain.handle("secure:save", async (event, data) => {
+    try {
+      const res = await saveSecureConfig(data ?? {});
+      if (!res.saved) sendLog(event, res.reason ?? "安全配置未落盘");
+      return Boolean(res.saved);
+    } catch (e: any) {
+      sendLog(event, e?.message ?? "安全配置保存失败");
+      return false;
+    }
   });
 
   ipcMain.handle("refblock:fetch", async (_event, params) => {
@@ -357,19 +386,19 @@ app.whenReady().then(() => {
 
   ipcMain.handle("file:readText", async (_event, token: string) => {
     const filePath = resolveReadFileByToken(token);
-    return fs.readFileSync(filePath, "utf8");
+    return readTextFileWithLimit(filePath);
   });
 
   ipcMain.handle("file:readJson", async (_event, token: string) => {
     const filePath = resolveReadFileByToken(token);
-    const text = fs.readFileSync(filePath, "utf8");
+    const text = await readTextFileWithLimit(filePath);
     return JSON.parse(text);
   });
 
   ipcMain.handle("file:writeText", async (_event, token: string, content: string) => {
     const filePath = resolveWriteFileByToken(token);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, content, "utf8");
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content, "utf8");
     return true;
   });
 
@@ -460,7 +489,7 @@ app.whenReady().then(() => {
     sendLog(event, `快捷归集开始: items=${signItems.length}, host=${fullHost}`);
     try {
       await collectSign(signInput as any, tempOutput, (p) => sendProgress(event, taskId, { stage: "sign", ...p }));
-      const signedText = fs.readFileSync(tempOutput, "utf8");
+      const signedText = await fsp.readFile(tempOutput, "utf8");
       const parsed = JSON.parse(signedText);
       const signedTxs = Array.isArray(parsed?.signed_txs) ? parsed.signed_txs : [];
       const broadcastRes = await broadcast(
@@ -493,7 +522,7 @@ app.whenReady().then(() => {
     const res = await broadcast(fullHost, signedTxs, tron_api_key, expectedContract, (p) =>
       sendProgress(event, taskId, { stage: "broadcast", ...p })
     );
-    fs.writeFileSync(resolvedOutput, JSON.stringify({ results: res.results }, null, 2));
+    await fsp.writeFile(resolvedOutput, JSON.stringify({ results: res.results }, null, 2), "utf8");
     sendLog(event, `广播完成: success=${res.success}, fail=${res.fail}`);
     return { ...res, outputPath: resolvedOutput };
   });
@@ -656,8 +685,10 @@ app.whenReady().then(() => {
     }
     const parsed = new URL(url);
     const protocol = parsed.protocol.toLowerCase();
-    if (protocol !== "https:" && protocol !== "http:") {
-      throw new Error("仅允许打开 http/https 链接");
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+    if (protocol !== "https:" && !(protocol === "http:" && isLocal)) {
+      throw new Error("仅允许打开 https 或本地调试链接");
     }
     await shell.openExternal(url);
   });

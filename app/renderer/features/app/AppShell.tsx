@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadConfigFromStorage } from "../../shared/config/storage";
 import { decryptSecret, derivePasswordHash, encryptSecret, fromBase64, toBase64 } from "../../shared/crypto/security";
+import { buildOtpAuthUrl, encodeBase32, verifyTotp } from "../../shared/crypto/totp";
+import QRCode from "qrcode";
 import { decodeMaybeBase64, decodeMaybeHex, formatBroadcastErrors } from "../../shared/parsers/broadcast";
 import { parseAddressAmountCsv, parseAddressCsv } from "../../shared/parsers/csv";
 import AuthScreen from "../auth/AuthScreen";
@@ -27,6 +29,19 @@ function safeJsonParse(text: string) {
   }
 }
 
+function normalizeOtpCode(code: string) {
+  return code.replace(/\s+/g, "");
+}
+
+function isOtpCodeValid(code: string) {
+  return /^\d{6}$/.test(normalizeOtpCode(code));
+}
+
+function generateMfaSecret() {
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return encodeBase32(bytes);
+}
+
 function isStrongPassword(value: string) {
   return value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value);
 }
@@ -36,12 +51,16 @@ function maskKey(value: string) {
   return value.length <= 6 ? "***" : `${value.slice(0, 3)}***${value.slice(-2)}`;
 }
 
+const MFA_ISSUER = "UPay Wallet";
+const MFA_LABEL = "Wallet Keys";
+
 function toLocalConfig(config: AppConfig): AppConfig {
   return {
     ...config,
     tron_api_key: "",
     auth_password_hash: "",
     auth_password_salt: "",
+    mfa_secret: "",
     hd_wallets: config.hd_wallets.map((wallet) => ({
       ...wallet,
       enc_mnemonic: ""
@@ -56,6 +75,8 @@ function toSecurePayload(config: AppConfig) {
     auth_password_salt: config.auth_password_salt,
     auth_password_iters: config.auth_password_iters,
     auth_session_minutes: config.auth_session_minutes,
+    mfa_enabled: config.mfa_enabled,
+    mfa_secret: config.mfa_secret,
     wallet_secrets: config.hd_wallets.map((wallet) => ({
       id: wallet.id,
       enc_mnemonic: wallet.enc_mnemonic || ""
@@ -72,6 +93,8 @@ function mergeSecureIntoConfig(base: AppConfig, secure: any): AppConfig {
       secretMap.set(id, String(item?.enc_mnemonic ?? ""));
     }
   }
+  const mergedSecret = String(secure?.mfa_secret ?? base.mfa_secret ?? "");
+  const mergedEnabled = Boolean(secure?.mfa_enabled ?? base.mfa_enabled ?? false);
   return {
     ...base,
     tron_api_key: String(secure?.tron_api_key ?? base.tron_api_key ?? ""),
@@ -82,6 +105,8 @@ function mergeSecureIntoConfig(base: AppConfig, secure: any): AppConfig {
     auth_password_salt: String(secure?.auth_password_salt ?? base.auth_password_salt ?? ""),
     auth_password_iters: Number(secure?.auth_password_iters ?? base.auth_password_iters ?? 100_000),
     auth_session_minutes: Number(secure?.auth_session_minutes ?? base.auth_session_minutes ?? 30),
+    mfa_enabled: mergedEnabled || Boolean(mergedSecret),
+    mfa_secret: mergedSecret,
     hd_wallets: base.hd_wallets.map((wallet) => ({
       ...wallet,
       enc_mnemonic: secretMap.get(wallet.id) ?? ""
@@ -105,6 +130,7 @@ export default function App() {
   const [unlockAt, setUnlockAt] = useState<number | null>(null);
   const [secureReady, setSecureReady] = useState(false);
   const sessionTimerRef = useRef<number | null>(null);
+  const secureSaveWarnedRef = useRef(false);
   const previewRequestedRef = useRef<Set<string>>(new Set());
   const [errorMessage, setErrorMessage] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -116,6 +142,12 @@ export default function App() {
   const [editingCollectionId, setEditingCollectionId] = useState<string | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [selectedWalletId, setSelectedWalletId] = useState("");
+  const [mfaSetupSecret, setMfaSetupSecret] = useState("");
+  const [mfaSetupCode, setMfaSetupCode] = useState("");
+  const [mfaDisableCode, setMfaDisableCode] = useState("");
+  const [mfaResult, setMfaResult] = useState("");
+  const [mfaError, setMfaError] = useState("");
+  const [mfaQrDataUrl, setMfaQrDataUrl] = useState("");
 
   // 离线签名表单
   const [addressAmountCsv, setAddressAmountCsv] = useState("index,address,amount\n");
@@ -127,6 +159,7 @@ export default function App() {
   const [signLoading, setSignLoading] = useState(false);
   const [quickAddressAmountCsv, setQuickAddressAmountCsv] = useState("index,address,amount\n");
   const [quickPassword, setQuickPassword] = useState("");
+  const [quickOtpCode, setQuickOtpCode] = useState("");
   const [quickResult, setQuickResult] = useState("");
   const [quickLoading, setQuickLoading] = useState(false);
 
@@ -209,6 +242,7 @@ export default function App() {
       tron_api_key: maskKey(config.tron_api_key),
       auth_password_hash: config.auth_password_hash ? "[REDACTED]" : "",
       auth_password_salt: config.auth_password_salt ? "[REDACTED]" : "",
+      mfa_secret: config.mfa_secret ? "[REDACTED]" : "",
       hd_wallets: config.hd_wallets.map((wallet) => ({
         ...wallet,
         enc_mnemonic: wallet.enc_mnemonic ? "[REDACTED]" : ""
@@ -216,6 +250,29 @@ export default function App() {
     };
   }, [config]);
   const toAddress = selectedCollection?.address ?? "";
+  const mfaEnabled = Boolean(config.mfa_enabled && config.mfa_secret);
+  const mfaOtpAuthUrl = useMemo(() => {
+    if (!mfaSetupSecret) return "";
+    return buildOtpAuthUrl({ secret: mfaSetupSecret, issuer: MFA_ISSUER, label: MFA_LABEL });
+  }, [mfaSetupSecret]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mfaOtpAuthUrl) {
+      setMfaQrDataUrl("");
+      return;
+    }
+    QRCode.toDataURL(mfaOtpAuthUrl, { margin: 1, width: 180 })
+      .then((url) => {
+        if (!cancelled) setMfaQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setMfaQrDataUrl("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mfaOtpAuthUrl]);
 
   useEffect(() => {
     window.api.appInfo().then(setAppInfo);
@@ -262,9 +319,17 @@ export default function App() {
 
   useEffect(() => {
     if (!secureReady) return;
-    window.api.saveSecureConfig(toSecurePayload(config)).catch(() => {
-      // ignore persistence errors
-    });
+    window.api
+      .saveSecureConfig(toSecurePayload(config))
+      .then((ok) => {
+        if (!ok && !secureSaveWarnedRef.current) {
+          secureSaveWarnedRef.current = true;
+          reportError("安全存储不可用，敏感配置未持久化。请启用系统钥匙串/密钥环。");
+        }
+      })
+      .catch(() => {
+        // ignore persistence errors
+      });
   }, [config, secureReady]);
 
   useEffect(() => {
@@ -579,6 +644,18 @@ export default function App() {
     setSettingsOpen(true);
   }
 
+  function handleOpenQuickTab() {
+    if (!mfaEnabled) {
+      const msg = "请先在设置中启用 Google 二次验证";
+      setQuickResult(msg);
+      reportError(msg);
+      setSettingsTab("security");
+      setSettingsOpen(true);
+      return;
+    }
+    setActiveTab("quick");
+  }
+
   function handleDeleteCollection(id: string) {
     setConfig((prev) => ({
       ...prev,
@@ -738,6 +815,72 @@ export default function App() {
     } catch (e: any) {
       setSecurityResult(e?.message ?? String(e));
     }
+  }
+
+  function resetMfaMessages() {
+    setMfaError("");
+    setMfaResult("");
+  }
+
+  function handleStartMfaSetup() {
+    resetMfaMessages();
+    setMfaSetupSecret(generateMfaSecret());
+    setMfaSetupCode("");
+  }
+
+  function handleCancelMfaSetup() {
+    setMfaSetupSecret("");
+    setMfaSetupCode("");
+    resetMfaMessages();
+  }
+
+  async function handleConfirmMfaEnable() {
+    resetMfaMessages();
+    if (!mfaSetupSecret) {
+      setMfaError("请先生成绑定密钥");
+      return;
+    }
+    if (!isOtpCodeValid(mfaSetupCode)) {
+      setMfaError("请输入 6 位验证码");
+      return;
+    }
+    const ok = await verifyTotp(mfaSetupSecret, mfaSetupCode);
+    if (!ok) {
+      setMfaError("验证码错误或已过期，请重试");
+      return;
+    }
+    setConfig((prev) => ({
+      ...prev,
+      mfa_enabled: true,
+      mfa_secret: mfaSetupSecret
+    }));
+    setMfaSetupSecret("");
+    setMfaSetupCode("");
+    setMfaResult("Google 二次验证已启用");
+  }
+
+  async function handleDisableMfa() {
+    resetMfaMessages();
+    if (!config.mfa_secret) {
+      setMfaError("当前未启用二次验证");
+      return;
+    }
+    if (!isOtpCodeValid(mfaDisableCode)) {
+      setMfaError("请输入 6 位验证码");
+      return;
+    }
+    const ok = await verifyTotp(config.mfa_secret, mfaDisableCode);
+    if (!ok) {
+      setMfaError("验证码错误或已过期，请重试");
+      return;
+    }
+    setConfig((prev) => ({
+      ...prev,
+      mfa_enabled: false,
+      mfa_secret: ""
+    }));
+    setMfaDisableCode("");
+    setMfaResult("Google 二次验证已关闭");
   }
 
   async function handleCreateHdWallet() {
@@ -958,8 +1101,14 @@ export default function App() {
   async function handleLoadAddressAmountCsv() {
     const file = await window.api.selectOpenFile({ filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (!file) return;
-    const text = await window.api.readTextFile(file.token);
-    setAddressAmountCsv(text);
+    try {
+      const text = await window.api.readTextFile(file.token);
+      setAddressAmountCsv(text);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setSignResult(msg);
+      reportError(msg);
+    }
   }
 
 
@@ -1117,6 +1266,30 @@ export default function App() {
     setQuickLoading(true);
     setQuickResult("");
     setErrorMessage("");
+    if (!mfaEnabled) {
+      const msg = "请先在设置中启用 Google 二次验证";
+      setQuickResult(msg);
+      reportError(msg);
+      setSettingsTab("security");
+      setSettingsOpen(true);
+      setQuickLoading(false);
+      return;
+    }
+    if (!isOtpCodeValid(quickOtpCode)) {
+      const msg = "请输入 6 位 Google 验证码";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
+    const otpOk = await verifyTotp(config.mfa_secret, quickOtpCode);
+    if (!otpOk) {
+      const msg = "Google 验证码错误或已过期";
+      setQuickResult(msg);
+      reportError(msg);
+      setQuickLoading(false);
+      return;
+    }
     if (!toAddress) {
       const msg = "请先在设置中添加归集地址并选择目标地址";
       setQuickResult(msg);
@@ -1285,15 +1458,27 @@ export default function App() {
   async function handleLoadSignedJson() {
     const file = await window.api.selectOpenFile({ filters: [{ name: "JSON", extensions: ["json"] }] });
     if (!file) return;
-    const text = await window.api.readTextFile(file.token);
-    setSignedJsonText(text);
+    try {
+      const text = await window.api.readTextFile(file.token);
+      setSignedJsonText(text);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setBroadcastResult(msg);
+      reportError(msg);
+    }
   }
 
   async function handleLoadRefBlockJson() {
     const file = await window.api.selectOpenFile({ filters: [{ name: "JSON", extensions: ["json"] }] });
     if (!file) return;
-    const text = await window.api.readTextFile(file.token);
-    setRefBlockJsonInput(text);
+    try {
+      const text = await window.api.readTextFile(file.token);
+      setRefBlockJsonInput(text);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setRefblockExportResult(msg);
+      reportError(msg);
+    }
   }
 
   async function handlePickBroadcastOutput() {
@@ -1363,8 +1548,14 @@ export default function App() {
   async function handleLoadScanCsv() {
     const file = await window.api.selectOpenFile({ filters: [{ name: "CSV", extensions: ["csv"] }] });
     if (!file) return;
-    const text = await window.api.readTextFile(file.token);
-    setScanAddressCsv(text);
+    try {
+      const text = await window.api.readTextFile(file.token);
+      setScanAddressCsv(text);
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      setScanResult(msg);
+      reportError(msg);
+    }
   }
 
   async function handleScan() {
@@ -1423,7 +1614,9 @@ export default function App() {
           const idx = indexMap.get(i.address);
           return `${idx ?? ""},${i.address},${i.amount}`;
         });
-        setScanOverCsv([header, ...out].join("\n"));
+        const csvText = [header, ...out].join("\n");
+        setScanOverCsv(csvText);
+        setQuickAddressAmountCsv(csvText);
       }
     } catch (e: any) {
       const msg = e?.message ?? String(e);
@@ -1715,7 +1908,7 @@ export default function App() {
         </div>
         <div className="tabs-group">
           <span className="tabs-label online">联网</span>
-          <button className={activeTab === "quick" ? "active online" : "online"} onClick={() => setActiveTab("quick")}>
+          <button className={activeTab === "quick" ? "active online" : "online"} onClick={handleOpenQuickTab}>
             快捷归集
           </button>
           <button className={activeTab === "transfer" ? "active online" : "online"} onClick={() => setActiveTab("transfer")}>
@@ -1992,6 +2185,7 @@ export default function App() {
                 onClick={() => {
                   setQuickAddressAmountCsv("index,address,amount\n");
                   setQuickPassword("");
+                  setQuickOtpCode("");
                   setQuickResult("");
                 }}
               >
@@ -2055,14 +2249,29 @@ export default function App() {
                   onChange={(e) => setQuickPassword(e.target.value)}
                 />
               </label>
+              <label>
+                Google 验证码
+                <input
+                  value={quickOtpCode}
+                  onChange={(e) => setQuickOtpCode(e.target.value)}
+                  placeholder="6 位数字"
+                  inputMode="numeric"
+                />
+              </label>
             </div>
             <div className="row space">
               <h3>地址 + 金额 CSV</h3>
               <button onClick={async () => {
                 const file = await window.api.selectOpenFile({ filters: [{ name: "CSV", extensions: ["csv"] }] });
                 if (!file) return;
-                const text = await window.api.readTextFile(file.token);
-                setQuickAddressAmountCsv(text);
+                try {
+                  const text = await window.api.readTextFile(file.token);
+                  setQuickAddressAmountCsv(text);
+                } catch (e: any) {
+                  const msg = e?.message ?? String(e);
+                  setQuickResult(msg);
+                  reportError(msg);
+                }
               }}>导入 CSV</button>
             </div>
             <textarea
@@ -2730,6 +2939,85 @@ export default function App() {
                       )}
                     </div>
                     {securityResult && <div className="result">{securityResult}</div>}
+
+                    <div className="divider" />
+
+                    <div className="row space" style={{ marginBottom: 8 }}>
+                      <div>
+                        <h3>Google 二次验证</h3>
+                        <div className="hint">启用后，快捷归集必须输入验证码。</div>
+                      </div>
+                      <span className="badge">{mfaEnabled ? "已启用" : "未启用"}</span>
+                    </div>
+
+                    {!mfaEnabled && (
+                      <>
+                        {!mfaSetupSecret && (
+                          <div className="row">
+                            <button className="primary-button" onClick={handleStartMfaSetup}>
+                              开始绑定
+                            </button>
+                          </div>
+                        )}
+                        {mfaSetupSecret && (
+                          <div className="mnemonic-card">
+                            <h4>绑定密钥</h4>
+                            <textarea value={mfaSetupSecret} readOnly rows={2} />
+                            {mfaQrDataUrl && (
+                              <div className="row" style={{ marginTop: 10 }}>
+                                <img src={mfaQrDataUrl} alt="Google 2FA QR" />
+                              </div>
+                            )}
+                            <div className="hint">
+                              使用 Google Authenticator 扫码或手动添加密钥后，输入 6 位验证码完成绑定。
+                            </div>
+                            <label>
+                              otpauth URL
+                              <input value={mfaOtpAuthUrl} readOnly />
+                            </label>
+                            <label>
+                              验证码
+                              <input
+                                value={mfaSetupCode}
+                                onChange={(e) => setMfaSetupCode(e.target.value)}
+                                placeholder="6 位数字"
+                                inputMode="numeric"
+                              />
+                            </label>
+                            <div className="row">
+                              <button className="primary-button" onClick={handleConfirmMfaEnable}>
+                                完成绑定
+                              </button>
+                              <button onClick={handleCancelMfaSetup}>取消</button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {mfaEnabled && (
+                      <>
+                        <div className="grid">
+                          <label>
+                            关闭验证码
+                            <input
+                              value={mfaDisableCode}
+                              onChange={(e) => setMfaDisableCode(e.target.value)}
+                              placeholder="6 位数字"
+                              inputMode="numeric"
+                            />
+                          </label>
+                        </div>
+                        <div className="row">
+                          <button className="danger-button" onClick={handleDisableMfa}>
+                            关闭二次验证
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    {mfaError && <div className="inline-error">{mfaError}</div>}
+                    {mfaResult && <div className="result">{mfaResult}</div>}
                   </div>
                 )}
               </div>
