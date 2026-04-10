@@ -120,6 +120,7 @@ declare global {
       }>;
       onProgress: (cb: (payload: any) => void) => () => void;
       onLog: (cb: (message: string) => void) => () => void;
+      writeLog: (message: string) => Promise<boolean>;
     };
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "upay-wallet",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "private": true,
   "description": "Enterprise TRON desktop app: offline signing + broadcast (TRC20 USDT)",
   "author": "Your Company",

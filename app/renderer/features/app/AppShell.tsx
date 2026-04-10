@@ -606,7 +606,15 @@ export default function App() {
     setEditingCollectionId(null);
   }
 
-  function handleSaveCollection() {
+  async function logCollectionAction(message: string) {
+    try {
+      await window.api.writeLog(message);
+    } catch {
+      // ignore log failures
+    }
+  }
+
+  async function handleSaveCollection() {
     const name = collectionName.trim();
     const address = collectionAddress.trim();
     if (!name || !address) {
@@ -620,6 +628,9 @@ export default function App() {
       setCollectionError("该归集地址已存在，请勿重复添加");
       return;
     }
+    const prevItem = editingCollectionId
+      ? config.collection_addresses.find((item) => item.id === editingCollectionId) || null
+      : null;
     setConfig((prev) => {
       const list = [...prev.collection_addresses];
       if (editingCollectionId) {
@@ -633,6 +644,12 @@ export default function App() {
       return { ...prev, collection_addresses: list };
     });
     resetCollectionForm();
+    if (editingCollectionId) {
+      const before = prevItem ? `${prevItem.name} (${prevItem.address})` : "未知";
+      await logCollectionAction(`归集地址修改: ${before} -> ${name} (${address})`);
+    } else {
+      await logCollectionAction(`归集地址新增: ${name} (${address})`);
+    }
   }
 
   function handleEditCollection(item: CollectionAddress) {
@@ -656,13 +673,17 @@ export default function App() {
     setActiveTab("quick");
   }
 
-  function handleDeleteCollection(id: string) {
+  async function handleDeleteCollection(id: string) {
+    const item = config.collection_addresses.find((row) => row.id === id);
     setConfig((prev) => ({
       ...prev,
       collection_addresses: prev.collection_addresses.filter((item) => item.id !== id)
     }));
     if (selectedCollectionId === id) {
       setSelectedCollectionId("");
+    }
+    if (item) {
+      await logCollectionAction(`归集地址删除: ${item.name} (${item.address})`);
     }
   }
 
@@ -2736,8 +2757,13 @@ export default function App() {
                 <h2>设置中心</h2>
                 <div className="muted">配置网络、归集地址与常用参数</div>
               </div>
-              <button className="ghost-button" onClick={() => setSettingsOpen(false)}>
-                关闭
+              <button
+                className="close-x-button"
+                onClick={() => setSettingsOpen(false)}
+                aria-label="关闭"
+                title="关闭"
+              >
+                ×
               </button>
             </div>
             <div className="modal-body">
@@ -2809,6 +2835,19 @@ export default function App() {
                           type="number"
                           value={Number.isFinite(config.fee_limit) ? String(config.fee_limit) : ""}
                           onChange={(e) => updateConfig("fee_limit", Number(e.target.value || 0))}
+                        />
+                      </label>
+                      <label>
+                        登录保持时间（分钟）
+                        <input
+                          type="number"
+                          min={1}
+                          value={String(config.auth_session_minutes || 30)}
+                          onChange={(e) => {
+                            const v = Number(e.target.value || 0);
+                            if (!Number.isFinite(v) || v <= 0) return;
+                            updateConfig("auth_session_minutes", Math.floor(v));
+                          }}
                         />
                       </label>
                     </div>
@@ -2887,7 +2926,7 @@ export default function App() {
                         <div className="hint">设置后每次启动需要登录才能进入。</div>
                       </div>
                     </div>
-                    <div className="grid">
+                    <div className="grid security-login-grid">
                       {config.auth_password_hash && (
                         <label>
                           当前密码
@@ -2898,19 +2937,6 @@ export default function App() {
                           />
                         </label>
                       )}
-                      <label>
-                        登录保持时间（分钟）
-                        <input
-                          type="number"
-                          min={1}
-                          value={String(config.auth_session_minutes || 30)}
-                          onChange={(e) => {
-                            const v = Number(e.target.value || 0);
-                            if (!Number.isFinite(v) || v <= 0) return;
-                            updateConfig("auth_session_minutes", Math.floor(v));
-                          }}
-                        />
-                      </label>
                       <label>
                         新密码
                         <input
@@ -2928,7 +2954,7 @@ export default function App() {
                         />
                       </label>
                     </div>
-                    <div className="row">
+                    <div className="row security-login-actions">
                       <button className="primary-button" onClick={handleSetLoginPassword}>
                         {config.auth_password_hash ? "更新登录密码" : "设置登录密码"}
                       </button>

@@ -198,7 +198,8 @@ function sendProgress(event: Electron.IpcMainInvokeEvent, taskId: string, payloa
 
 function sendLog(event: Electron.IpcMainInvokeEvent, message: string) {
   logger.write(message);
-  event.sender.send("app:log", message);
+  const ts = new Date().toISOString();
+  event.sender.send("app:log", `${ts} ${message}`);
 }
 
 function resolveOutputPath(filePath: string | undefined, defaultName: string) {
@@ -346,6 +347,12 @@ app.whenReady().then(() => {
     const res = await loadSecureConfig();
     if (res.warning) sendLog(event, res.warning);
     return res.data;
+  });
+  ipcMain.handle("log:write", async (event, message: string) => {
+    if (typeof message === "string" && message.trim()) {
+      sendLog(event, message.trim());
+    }
+    return true;
   });
   ipcMain.handle("secure:save", async (event, data) => {
     try {
@@ -562,7 +569,6 @@ app.whenReady().then(() => {
       const res = await instance.balanceOf(address).call();
       usdtSun = normalizeTronValue(res);
     }
-    sendLog(event, `余额查询: address=${address}`);
     return { address, trxSun, usdtSun };
   });
 

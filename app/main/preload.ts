@@ -101,5 +101,6 @@ contextBridge.exposeInMainWorld("api", {
     const handler = (_event: Electron.IpcRendererEvent, message: string) => callback(message);
     ipcRenderer.on("app:log", handler);
     return () => ipcRenderer.removeListener("app:log", handler);
-  }
+  },
+  writeLog: (message: string) => ipcRenderer.invoke("log:write", message)
 });
